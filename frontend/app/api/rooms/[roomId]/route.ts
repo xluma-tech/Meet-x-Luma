@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-function getBackendUrl() {
-  const url = process.env.BACKEND_URL;
-  if (!url) {
-    throw new Error('BACKEND_URL environment variable is not set');
-  }
-  console.log('Rooms API Route - Backend URL:', url);
-  return url;
+const BACKEND_URL = process.env.BACKEND_URL;
+
+if (!BACKEND_URL) {
+  console.error('❌ BACKEND_URL is not set! Requests will fail.');
 }
+
+console.log('✅ Rooms API Route - Backend URL:', BACKEND_URL);
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ roomId: string }> }
+  { params }: { params: { roomId: string } }
 ) {
   try {
-    const { roomId } = await params;
-    const backendUrl = getBackendUrl();
-    const response = await fetch(`${backendUrl}/api/rooms/${roomId}`, {
+    if (!BACKEND_URL) {
+      throw new Error('BACKEND_URL environment variable is not configured');
+    }
+
+    const { roomId } = params;
+    const response = await fetch(`${BACKEND_URL}/api/rooms/${roomId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

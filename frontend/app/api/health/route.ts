@@ -1,19 +1,33 @@
 import { NextResponse } from 'next/server';
 
-function getBackendUrl() {
-  const url = process.env.BACKEND_URL;
-  if (!url) {
-    throw new Error('BACKEND_URL environment variable is not set');
-  }
-  console.log('Health API Route - Backend URL:', url);
-  return url;
+const BACKEND_URL = process.env.BACKEND_URL;
+
+if (!BACKEND_URL) {
+  console.error('❌ BACKEND_URL is not set! Requests will fail.');
 }
+
+console.log('✅ Health API Route - Backend URL:', BACKEND_URL);
 
 export async function GET() {
   try {
-    const backendUrl = getBackendUrl();
+    if (!BACKEND_URL) {
+      return NextResponse.json(
+        {
+          frontend: {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+          },
+          backend: {
+            status: 'error',
+            message: 'BACKEND_URL not configured',
+          },
+        },
+        { status: 503 }
+      );
+    }
+
     // Check backend health
-    const backendResponse = await fetch(`${backendUrl}/health`, {
+    const backendResponse = await fetch(`${BACKEND_URL}/health`, {
       method: 'GET',
     });
 
