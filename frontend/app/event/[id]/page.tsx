@@ -39,7 +39,7 @@ export default function EventPage() {
     setError(null);
 
     // Client-side: uses NEXT_PUBLIC_API_URL from Vercel env vars
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL;
     console.log('[Fetch Event] Calling backend:', backendUrl, 'Event ID:', eventId);
     
     fetch(`${backendUrl}/api/events/${eventId}`)

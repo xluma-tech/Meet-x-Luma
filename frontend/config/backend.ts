@@ -11,7 +11,7 @@ export const getBackendUrl = (): string => {
   
   if (isServer) {
     // Server-side (API routes): prefer API_URL, fallback to NEXT_PUBLIC_API_URL
-    const url = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    const url =  process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
     console.log('[Backend Config - Server]', {
       API_URL: process.env.API_URL || 'not set',
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
