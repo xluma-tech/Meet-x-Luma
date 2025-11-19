@@ -10,14 +10,14 @@ console.log('✅ Events [id] API Route - Backend URL:', BACKEND_URL);
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!BACKEND_URL) {
       throw new Error('BACKEND_URL environment variable is not configured');
     }
 
-    const { id } = params;
+    const { id } = await params;
     const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
       method: 'GET',
       headers: {
@@ -48,14 +48,14 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!BACKEND_URL) {
       throw new Error('BACKEND_URL environment variable is not configured');
     }
 
-    const { id } = params;
+    const { id } = await params;
     const body = await request.json();
 
     const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
@@ -89,14 +89,14 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     if (!BACKEND_URL) {
       throw new Error('BACKEND_URL environment variable is not configured');
     }
 
-    const { id } = params;
+    const { id } = await params;
     const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
       method: 'DELETE',
       headers: {

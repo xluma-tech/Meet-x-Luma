@@ -10,14 +10,14 @@ console.log('✅ Rooms API Route - Backend URL:', BACKEND_URL);
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { roomId: string } }
+  { params }: { params: Promise<{ roomId: string }> }
 ) {
   try {
     if (!BACKEND_URL) {
       throw new Error('BACKEND_URL environment variable is not configured');
     }
 
-    const { roomId } = params;
+    const { roomId } = await params;
     const response = await fetch(`${BACKEND_URL}/api/rooms/${roomId}`, {
       method: 'GET',
       headers: {
