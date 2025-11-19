@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
+
+console.log('Health API Route - Backend URL:', BACKEND_URL);
 
 export async function GET() {
   try {

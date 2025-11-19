@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+// Use NEXT_PUBLIC_API_URL for consistency, fallback to localhost
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
+
+console.log('Events API Route - Backend URL:', BACKEND_URL);
 
 export async function GET() {
   try {
