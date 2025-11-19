@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
-
-console.log('Events [id] API Route - Backend URL:', BACKEND_URL);
+function getBackendUrl() {
+  const url = process.env.BACKEND_URL;
+  if (!url) {
+    throw new Error('BACKEND_URL environment variable is not set');
+  }
+  console.log('Events [id] API Route - Backend URL:', url);
+  return url;
+}
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +15,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    const backendUrl = getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -45,8 +51,9 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
+    const backendUrl = getBackendUrl();
 
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -81,7 +88,8 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    const backendUrl = getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

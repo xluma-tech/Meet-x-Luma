@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
-
-console.log('Rooms API Route - Backend URL:', BACKEND_URL);
+function getBackendUrl() {
+  const url = process.env.BACKEND_URL;
+  if (!url) {
+    throw new Error('BACKEND_URL environment variable is not set');
+  }
+  console.log('Rooms API Route - Backend URL:', url);
+  return url;
+}
 
 export async function GET(
   request: NextRequest,
@@ -10,7 +15,8 @@ export async function GET(
 ) {
   try {
     const { roomId } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/rooms/${roomId}`, {
+    const backendUrl = getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/rooms/${roomId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -18,15 +24,21 @@ export async function GET(
     });
 
     if (!response.ok) {
-      throw new Error('Failed to fetch room info');
+      if (response.status === 404) {
+        return NextResponse.json(
+          { error: 'Room not found' },
+          { status: 404 }
+        );
+      }
+      throw new Error('Failed to fetch room');
     }
 
     const data = await response.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Error fetching room info:', error);
+    console.error('Error fetching room:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch room info' },
+      { error: 'Failed to fetch room' },
       { status: 500 }
     );
   }

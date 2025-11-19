@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
-
-console.log('Health API Route - Backend URL:', BACKEND_URL);
+function getBackendUrl() {
+  const url = process.env.BACKEND_URL;
+  if (!url) {
+    throw new Error('BACKEND_URL environment variable is not set');
+  }
+  console.log('Health API Route - Backend URL:', url);
+  return url;
+}
 
 export async function GET() {
   try {
+    const backendUrl = getBackendUrl();
     // Check backend health
-    const backendResponse = await fetch(`${BACKEND_URL}/health`, {
+    const backendResponse = await fetch(`${backendUrl}/health`, {
       method: 'GET',
     });
 

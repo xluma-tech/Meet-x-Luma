@@ -1,0 +1,37 @@
+DEPLOYMENT CHECKLIST
+====================
+
+STEP 1: BACKEND (Render)
+-------------------------
+✓ Deploy backend to: https://meet-x-luma.onrender.com
+✓ Set environment variable: CORS_ORIGIN=https://meet.xluma.in
+✓ Set environment variable: NODE_ENV=production
+✓ Set environment variable: PORT=4000
+✓ Verify backend is running: https://meet-x-luma.onrender.com/health
+
+STEP 2: FRONTEND (Vercel)
+--------------------------
+✓ Go to: https://vercel.com/your-project/settings/environment-variables
+✓ Set BACKEND_URL = https://meet-x-luma.onrender.com
+✓ Set NEXT_PUBLIC_SOCKET_URL = https://meet-x-luma.onrender.com
+✓ Set NEXT_PUBLIC_APP_URL = https://meet.xluma.in
+✓ Redeploy frontend
+
+STEP 3: TEST
+------------
+1. Open: https://meet.xluma.in/create
+2. Fill in event details and click "Create Meeting"
+3. Open browser DevTools > Network tab
+4. You should see POST request to: https://meet-x-luma.onrender.com/api/events
+5. You should be redirected to: https://meet.xluma.in/event/[event-id]
+
+TROUBLESHOOTING:
+----------------
+If still going to frontend URL:
+- Clear Vercel build cache and redeploy
+- Check Vercel logs for "Backend URL: https://meet-x-luma.onrender.com"
+- Make sure BACKEND_URL is set in Production environment (not just Preview)
+
+If CORS errors:
+- Check backend CORS_ORIGIN is exactly: https://meet.xluma.in (no trailing slash)
+- Restart backend after changing CORS_ORIGIN

@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Use NEXT_PUBLIC_API_URL for consistency, fallback to localhost
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:4000';
-
-console.log('Events API Route - Backend URL:', BACKEND_URL);
+// Get backend URL from environment variables
+function getBackendUrl() {
+  const url = process.env.BACKEND_URL;
+  if (!url) {
+    throw new Error('BACKEND_URL environment variable is not set');
+  }
+  console.log('Events API Route - Backend URL:', url);
+  return url;
+}
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/events`, {
+    const backendUrl = getBackendUrl();
+    const response = await fetch(`${backendUrl}/api/events`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -32,8 +38,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const backendUrl = getBackendUrl();
 
-    const response = await fetch(`${BACKEND_URL}/api/events`, {
+    const response = await fetch(`${backendUrl}/api/events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

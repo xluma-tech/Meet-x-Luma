@@ -1,0 +1,38 @@
+VERCEL ENVIRONMENT VARIABLES SETUP
+==================================
+
+Go to: https://vercel.com/your-project/settings/environment-variables
+
+SET THESE EXACT VALUES:
+
+1. BACKEND_URL (REQUIRED)
+   Value: https://meet-x-luma.onrender.com
+   Environment: Production, Preview, Development
+
+2. NEXT_PUBLIC_SOCKET_URL (REQUIRED)
+   Value: https://meet-x-luma.onrender.com
+   Environment: Production, Preview, Development
+
+3. NEXT_PUBLIC_APP_URL
+   Value: https://meet.xluma.in
+   Environment: Production, Preview, Development
+
+After updating:
+- Click "Save"
+- Go to Deployments tab
+- Click "Redeploy" on the latest deployment
+
+BACKEND SETUP (Render):
+=======================
+Make sure your backend on Render has:
+- CORS_ORIGIN=https://meet.xluma.in
+- PORT=4000 (or whatever Render assigns)
+- NODE_ENV=production
+
+VERIFICATION:
+=============
+After deployment, test:
+1. Go to https://meet.xluma.in/create
+2. Create a new event
+3. Check browser Network tab - should see requests to https://meet-x-luma.onrender.com
+4. Check Vercel logs - should see "Backend URL: https://meet-x-luma.onrender.com"
