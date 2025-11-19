@@ -1,23 +1,32 @@
 // Backend configuration
-// Uses NEXT_PUBLIC_API_URL from Vercel environment variables
+// Handles both client-side and server-side API calls
 
+/**
+ * Get the backend API URL
+ * - Client-side: uses NEXT_PUBLIC_API_URL
+ * - Server-side: uses API_URL (if set) or NEXT_PUBLIC_API_URL
+ */
 export const getBackendUrl = (): string => {
-  // Priority order:
-  // 1. NEXT_PUBLIC_API_URL (set in Vercel)
-  // 2. Hardcoded production URL (fallback)
+  const isServer = typeof window === 'undefined';
   
-  const envUrl = process.env.NEXT_PUBLIC_API_URL;
-  const fallbackUrl = 'https://meet-x-luma.onrender.com';
-  
-  const url = envUrl || fallbackUrl;
-  
-  console.log('Backend URL Config:', {
-    fromEnv: envUrl || 'not set',
-    fallback: fallbackUrl,
-    using: url
-  });
-  
-  return url;
+  if (isServer) {
+    // Server-side (API routes): prefer API_URL, fallback to NEXT_PUBLIC_API_URL
+    const url = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    console.log('[Backend Config - Server]', {
+      API_URL: process.env.API_URL || 'not set',
+      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
+      using: url
+    });
+    return url;
+  } else {
+    // Client-side (browser): use NEXT_PUBLIC_API_URL
+    const url = process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    console.log('[Backend Config - Client]', {
+      NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
+      using: url
+    });
+    return url;
+  }
 };
 
 export const config = {

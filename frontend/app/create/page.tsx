@@ -19,15 +19,24 @@ export default function CreateEvent() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/events', {
+      // Client-side: uses NEXT_PUBLIC_API_URL from Vercel env vars
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+      console.log('[Create Event] Calling backend:', backendUrl);
+      
+      const response = await fetch(`${backendUrl}/api/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
 
-      if (!response.ok) throw new Error('Failed to create event');
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Create Event] Backend error:', errorText);
+        throw new Error('Failed to create event');
+      }
 
       const data = await response.json();
+      console.log('[Create Event] Success:', data.id);
       router.push(`/event/${data.id}`);
     } catch (error) {
       console.error('Error creating event:', error);

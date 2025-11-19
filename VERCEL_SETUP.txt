@@ -1,72 +1,123 @@
 🚀 VERCEL ENVIRONMENT VARIABLES SETUP
 ======================================
 
+CRITICAL: Set these in Vercel Dashboard before deploying!
+
 Go to: https://vercel.com/your-project/settings/environment-variables
 
-📋 SET THESE EXACT VALUES:
---------------------------
+📋 REQUIRED ENVIRONMENT VARIABLES:
+----------------------------------
 
-1. NEXT_PUBLIC_API_URL (REQUIRED - Backend API URL)
+1. NEXT_PUBLIC_API_URL (Client-side - REQUIRED)
    Name: NEXT_PUBLIC_API_URL
    Value: https://meet-x-luma.onrender.com
    Environment: ✅ Production ✅ Preview ✅ Development
+   Purpose: Used by browser to call backend API directly
    
-2. NEXT_PUBLIC_SOCKET_URL (REQUIRED - Socket.IO URL)
+2. API_URL (Server-side - Optional but recommended)
+   Name: API_URL
+   Value: https://meet-x-luma.onrender.com
+   Environment: ✅ Production ✅ Preview ✅ Development
+   Purpose: Used by Next.js API routes (server-side only, more secure)
+
+3. NEXT_PUBLIC_SOCKET_URL (Client-side - REQUIRED)
    Name: NEXT_PUBLIC_SOCKET_URL
    Value: https://meet-x-luma.onrender.com
    Environment: ✅ Production ✅ Preview ✅ Development
+   Purpose: Used by Socket.IO client connection
 
-3. NEXT_PUBLIC_APP_URL (Optional - Frontend URL)
+4. NEXT_PUBLIC_APP_URL (Optional)
    Name: NEXT_PUBLIC_APP_URL
    Value: https://meet.xluma.in
    Environment: ✅ Production ✅ Preview ✅ Development
+   Purpose: Frontend URL for redirects
 
 ⚠️ IMPORTANT NOTES:
 -------------------
-- All variables are prefixed with NEXT_PUBLIC_ (works in both server and client)
-- You MUST check all three environments (Production, Preview, Development)
+- NEXT_PUBLIC_* variables are exposed to the browser (client-side)
+- API_URL is server-only (not exposed to browser, more secure)
+- You MUST check all three environments when adding variables
 - After saving, you MUST redeploy (not just rebuild)
 
-🔄 AFTER SETTING VARIABLES:
----------------------------
-1. Click "Save" on each variable
-2. Go to "Deployments" tab
-3. Find your latest deployment
-4. Click "..." menu → "Redeploy"
-5. Wait for deployment to complete
+🔄 DEPLOYMENT STEPS:
+--------------------
+1. Add all environment variables in Vercel dashboard
+2. Click "Save" on each variable
+3. Go to "Deployments" tab
+4. Find your latest deployment
+5. Click "..." menu → "Redeploy"
+6. Wait for deployment to complete
 
 🧪 VERIFY IT'S WORKING:
 -----------------------
-Method 1: Test Backend Connection
-- Visit: https://meet.xluma.in/api/test-backend
-- Should show all tests passing with backend URL
 
-Method 2: Check Health Endpoint
-- Visit: https://meet.xluma.in/api/health
-- Should show backend status and URL
-
-Method 3: Create Event
+Method 1: Check Browser Console
 - Go to: https://meet.xluma.in/create
-- Create a test event
-- Should redirect to event page successfully
+- Open DevTools → Console
+- You should see: [Create Event] Calling backend: https://meet-x-luma.onrender.com
+
+Method 2: Check Network Tab
+- Go to: https://meet.xluma.in/create
+- Open DevTools → Network tab
+- Create an event
+- You should see POST request to: https://meet-x-luma.onrender.com/api/events
+- NOT to: https://meet.xluma.in/api/events
+
+Method 3: Test Backend Connection
+- Visit: https://meet.xluma.in/api/test-backend
+- Should show all tests passing with correct backend URL
+
+Method 4: Check Health Endpoint
+- Visit: https://meet.xluma.in/api/health
+- Should show backend status and correct URL
 
 🐛 TROUBLESHOOTING:
 -------------------
-Problem: Still using fallback URL
-Solution: 
-  - Make sure variable name is exactly: NEXT_PUBLIC_API_URL
-  - Check "Production" environment is selected
-  - Redeploy (not just rebuild)
-  - Clear browser cache
 
-Problem: CORS errors
+Problem: Still calling frontend URL (https://meet.xluma.in/api/events)
+Solution: 
+  ❌ You forgot to set NEXT_PUBLIC_API_URL in Vercel
+  ✅ Add NEXT_PUBLIC_API_URL = https://meet-x-luma.onrender.com
+  ✅ Redeploy (not just rebuild)
+  ✅ Clear browser cache and hard refresh (Ctrl+Shift+R)
+
+Problem: Console shows "not set" for NEXT_PUBLIC_API_URL
+Solution:
+  - Variable name must be exactly: NEXT_PUBLIC_API_URL (case-sensitive)
+  - Must be set in "Production" environment
+  - Must redeploy after adding variable
+  - Check you didn't add extra spaces in the value
+
+Problem: CORS errors in browser console
 Solution:
   - Backend must have: CORS_ORIGIN=https://meet.xluma.in
   - No trailing slash in CORS_ORIGIN
   - Restart backend after changing CORS
+  - Check backend logs for CORS errors
 
-Problem: Backend unreachable
+Problem: Backend unreachable / timeout
 Solution:
   - Verify backend is running: https://meet-x-luma.onrender.com/health
   - Check backend logs for errors
-  - Ensure backend accepts requests from frontend domain
+  - Ensure backend accepts requests from any origin (or specifically from frontend)
+  - Check if Render.com backend is sleeping (free tier sleeps after inactivity)
+
+Problem: Environment variable works locally but not on Vercel
+Solution:
+  - Local .env files are NOT deployed to Vercel
+  - You MUST set variables in Vercel dashboard
+  - After setting, you MUST redeploy
+  - Check Vercel function logs to see what values are being used
+
+📝 HOW IT WORKS:
+----------------
+
+Client-side (Browser):
+  Browser → https://meet-x-luma.onrender.com/api/events (Direct to backend)
+  Uses: process.env.NEXT_PUBLIC_API_URL
+
+Server-side (Next.js API routes):
+  Next.js API Route → https://meet-x-luma.onrender.com/api/events (Proxy to backend)
+  Uses: process.env.API_URL || process.env.NEXT_PUBLIC_API_URL
+
+This is the correct architecture for production!
