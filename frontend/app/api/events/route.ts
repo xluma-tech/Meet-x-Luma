@@ -1,37 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// Get backend URL - must be set in Vercel environment variables
-const BACKEND_URL = process.env.BACKEND_URL;
-
-if (!BACKEND_URL) {
-  console.error('❌ BACKEND_URL is not set! Requests will fail.');
-}
-
-console.log('✅ Events API Route - Backend URL:', BACKEND_URL);
+import { getBackendUrl } from '@/config/backend';
 
 export async function GET() {
   try {
-    if (!BACKEND_URL) {
-      throw new Error('BACKEND_URL environment variable is not configured');
-    }
-
-    const response = await fetch(`${BACKEND_URL}/api/events`, {
+    const backendUrl = getBackendUrl();
+    console.log('📡 Fetching events from:', `${backendUrl}/api/events`);
+    
+    const response = await fetch(`${backendUrl}/api/events`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
 
+    console.log('📥 Backend response status:', response.status);
+
     if (!response.ok) {
-      throw new Error('Failed to fetch events');
+      throw new Error(`Backend returned ${response.status}`);
     }
 
     const data = await response.json();
+    console.log('✅ Successfully fetched events:', data.length || 0, 'events');
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Error fetching events:', error);
+    console.error('❌ Error fetching events:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch events' },
+      { 
+        error: 'Failed to fetch events',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -39,13 +36,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!BACKEND_URL) {
-      throw new Error('BACKEND_URL environment variable is not configured');
-    }
-
+    const backendUrl = getBackendUrl();
     const body = await request.json();
+    console.log('📡 Creating event at:', `${backendUrl}/api/events`);
 
-    const response = await fetch(`${BACKEND_URL}/api/events`, {
+    const response = await fetch(`${backendUrl}/api/events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,16 +48,24 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(body),
     });
 
+    console.log('📥 Backend response status:', response.status);
+
     if (!response.ok) {
-      throw new Error('Failed to create event');
+      const errorText = await response.text();
+      console.error('❌ Backend error:', errorText);
+      throw new Error(`Backend returned ${response.status}`);
     }
 
     const data = await response.json();
+    console.log('✅ Successfully created event:', data.id);
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
-    console.error('Error creating event:', error);
+    console.error('❌ Error creating event:', error);
     return NextResponse.json(
-      { error: 'Failed to create event' },
+      { 
+        error: 'Failed to create event',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

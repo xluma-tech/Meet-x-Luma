@@ -1,24 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const BACKEND_URL = process.env.BACKEND_URL;
-
-if (!BACKEND_URL) {
-  console.error('❌ BACKEND_URL is not set! Requests will fail.');
-}
-
-console.log('✅ Events [id] API Route - Backend URL:', BACKEND_URL);
+import { getBackendUrl } from '@/config/backend';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!BACKEND_URL) {
-      throw new Error('BACKEND_URL environment variable is not configured');
-    }
-
+    const backendUrl = getBackendUrl();
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -51,14 +42,11 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!BACKEND_URL) {
-      throw new Error('BACKEND_URL environment variable is not configured');
-    }
-
+    const backendUrl = getBackendUrl();
     const { id } = await params;
     const body = await request.json();
 
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -92,12 +80,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!BACKEND_URL) {
-      throw new Error('BACKEND_URL environment variable is not configured');
-    }
-
+    const backendUrl = getBackendUrl();
     const { id } = await params;
-    const response = await fetch(`${BACKEND_URL}/api/events/${id}`, {
+    
+    const response = await fetch(`${backendUrl}/api/events/${id}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
