@@ -1,12 +1,12 @@
 // Backend configuration
-// This file provides fallback values if environment variables are not set
+// Uses NEXT_PUBLIC_API_URL from Vercel environment variables
 
 export const getBackendUrl = (): string => {
   // Priority order:
-  // 1. Environment variable (set in Vercel/deployment platform)
+  // 1. NEXT_PUBLIC_API_URL (set in Vercel)
   // 2. Hardcoded production URL (fallback)
   
-  const envUrl = process.env.BACKEND_URL;
+  const envUrl = process.env.NEXT_PUBLIC_API_URL;
   const fallbackUrl = 'https://meet-x-luma.onrender.com';
   
   const url = envUrl || fallbackUrl;

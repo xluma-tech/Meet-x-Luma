@@ -1,31 +1,29 @@
 🚀 VERCEL ENVIRONMENT VARIABLES SETUP
 ======================================
 
-⚠️ CRITICAL: You MUST set these in Vercel Dashboard
-
 Go to: https://vercel.com/your-project/settings/environment-variables
 
 📋 SET THESE EXACT VALUES:
 --------------------------
 
-1. BACKEND_URL (Server-side - REQUIRED)
-   Name: BACKEND_URL
+1. NEXT_PUBLIC_API_URL (REQUIRED - Backend API URL)
+   Name: NEXT_PUBLIC_API_URL
    Value: https://meet-x-luma.onrender.com
    Environment: ✅ Production ✅ Preview ✅ Development
    
-2. NEXT_PUBLIC_SOCKET_URL (Client-side - REQUIRED)
+2. NEXT_PUBLIC_SOCKET_URL (REQUIRED - Socket.IO URL)
    Name: NEXT_PUBLIC_SOCKET_URL
    Value: https://meet-x-luma.onrender.com
    Environment: ✅ Production ✅ Preview ✅ Development
 
-3. NEXT_PUBLIC_APP_URL (Optional)
+3. NEXT_PUBLIC_APP_URL (Optional - Frontend URL)
    Name: NEXT_PUBLIC_APP_URL
    Value: https://meet.xluma.in
    Environment: ✅ Production ✅ Preview ✅ Development
 
 ⚠️ IMPORTANT NOTES:
 -------------------
-- BACKEND_URL is NOT prefixed with NEXT_PUBLIC_ (server-side only, more secure)
+- All variables are prefixed with NEXT_PUBLIC_ (works in both server and client)
 - You MUST check all three environments (Production, Preview, Development)
 - After saving, you MUST redeploy (not just rebuild)
 
@@ -39,26 +37,27 @@ Go to: https://vercel.com/your-project/settings/environment-variables
 
 🧪 VERIFY IT'S WORKING:
 -----------------------
-1. Go to: https://vercel.com/your-project/deployments
-2. Click on your latest deployment
-3. Click "Functions" tab
-4. Click on any API route (e.g., /api/events)
-5. Check logs - you should see:
-   ✅ Events API Route - Backend URL: https://meet-x-luma.onrender.com
+Method 1: Test Backend Connection
+- Visit: https://meet.xluma.in/api/test-backend
+- Should show all tests passing with backend URL
 
-If you see:
-   ❌ BACKEND_URL is not set! Requests will fail.
-   
-Then the environment variable is NOT set correctly.
+Method 2: Check Health Endpoint
+- Visit: https://meet.xluma.in/api/health
+- Should show backend status and URL
+
+Method 3: Create Event
+- Go to: https://meet.xluma.in/create
+- Create a test event
+- Should redirect to event page successfully
 
 🐛 TROUBLESHOOTING:
 -------------------
-Problem: Still seeing frontend URL in requests
+Problem: Still using fallback URL
 Solution: 
-  - Clear Vercel build cache
-  - Make sure BACKEND_URL is set in "Production" environment
+  - Make sure variable name is exactly: NEXT_PUBLIC_API_URL
+  - Check "Production" environment is selected
   - Redeploy (not just rebuild)
-  - Check Vercel function logs for the ✅ message
+  - Clear browser cache
 
 Problem: CORS errors
 Solution:
@@ -66,8 +65,8 @@ Solution:
   - No trailing slash in CORS_ORIGIN
   - Restart backend after changing CORS
 
-Problem: "BACKEND_URL not configured" error
+Problem: Backend unreachable
 Solution:
-  - Variable name must be exactly: BACKEND_URL (case-sensitive)
-  - Must be set in Production environment
-  - Must redeploy after adding variable
+  - Verify backend is running: https://meet-x-luma.onrender.com/health
+  - Check backend logs for errors
+  - Ensure backend accepts requests from frontend domain
