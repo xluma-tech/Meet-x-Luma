@@ -11,7 +11,7 @@ export const getBackendUrl = (): string => {
   
   if (isServer) {
     // Server-side (API routes): prefer API_URL, fallback to NEXT_PUBLIC_API_URL
-    const url =  process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    const url = process.env.NEXT_PUBLIC_API_URL as string ;
     console.log('[Backend Config - Server]', {
       API_URL: process.env.API_URL || 'not set',
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
@@ -20,7 +20,7 @@ export const getBackendUrl = (): string => {
     return url;
   } else {
     // Client-side (browser): use NEXT_PUBLIC_API_URL
-    const url = process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    const url = process.env.NEXT_PUBLIC_API_URL as string;
     console.log('[Backend Config - Client]', {
       NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'not set',
       using: url
@@ -30,7 +30,7 @@ export const getBackendUrl = (): string => {
 };
 
 export const config = {
-  backendUrl: getBackendUrl(),
-  socketUrl: process.env.NEXT_PUBLIC_SOCKET_URL || 'https://meet-x-luma.onrender.com',
-  appUrl: process.env.NEXT_PUBLIC_APP_URL || 'https://meet.xluma.in',
+  backendUrl: process.env.NEXT_PUBLIC_API_URL || getBackendUrl(),
+  socketUrl: process.env.NEXT_PUBLIC_SOCKET_URL,
+  appUrl: process.env.NEXT_PUBLIC_APP_URL,
 };

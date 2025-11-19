@@ -11,10 +11,10 @@ export function getApiUrl(): string {
   
   if (isServer) {
     // Server-side: prefer API_URL, fallback to NEXT_PUBLIC_API_URL
-    return process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    return process.env.NEXT_PUBLIC_API_URL as string ;
   } else {
     // Client-side: use NEXT_PUBLIC_API_URL
-    return process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+    return process.env.NEXT_PUBLIC_API_URL as string;
   }
 }
 

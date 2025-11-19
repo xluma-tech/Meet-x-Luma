@@ -20,7 +20,7 @@ export default function CreateEvent() {
 
     try {
       // Client-side: uses NEXT_PUBLIC_API_URL from Vercel env vars
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'https://meet-x-luma.onrender.com';
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL;
       console.log('[Create Event] Calling backend:', backendUrl);
       
       const response = await fetch(`${backendUrl}/api/events`, {
