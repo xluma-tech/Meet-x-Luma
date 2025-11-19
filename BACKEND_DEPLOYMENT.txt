@@ -1,0 +1,112 @@
+🚀 BACKEND DEPLOYMENT GUIDE (Render.com)
+==========================================
+
+Your backend is deployed at: https://meet-x-luma.onrender.com
+
+📋 REQUIRED ENVIRONMENT VARIABLES ON RENDER:
+--------------------------------------------
+
+Go to: https://dashboard.render.com/web/your-service/env
+
+Set these environment variables:
+
+1. NODE_ENV
+   Value: production
+
+2. PORT
+   Value: 4000
+   (Render may override this, that's OK)
+
+3. HOST
+   Value: 0.0.0.0
+
+4. CORS_ORIGIN
+   Value: https://meet.xluma.in
+   ⚠️ CRITICAL: This MUST match your frontend URL exactly
+   ⚠️ NO trailing slash!
+
+5. SOCKET_PING_TIMEOUT
+   Value: 60000
+
+6. SOCKET_PING_INTERVAL
+   Value: 25000
+
+🔄 AFTER SETTING VARIABLES:
+---------------------------
+1. Click "Save Changes"
+2. Render will automatically redeploy
+3. Wait for deployment to complete
+4. Check logs for: "✓ CORS Allowed Origins"
+
+✅ CORS IS NOW CONFIGURED TO ALLOW:
+-----------------------------------
+- http://localhost:3000 (local development)
+- https://meet.xluma.in (production frontend)
+- https://meet-x-luma.onrender.com (backend itself)
+- Any additional origin set in CORS_ORIGIN env var
+
+🧪 VERIFY CORS IS WORKING:
+--------------------------
+
+Method 1: Test from Browser Console
+- Go to: https://meet.xluma.in
+- Open DevTools → Console
+- Run: fetch('https://meet-x-luma.onrender.com/health').then(r => r.json()).then(console.log)
+- Should return health data without CORS error
+
+Method 2: Check Backend Logs
+- Go to Render dashboard → Your service → Logs
+- Look for: "✓ CORS Allowed Origins: [...]"
+- Should include https://meet.xluma.in
+
+Method 3: Create Event Test
+- Go to: https://meet.xluma.in/create
+- Fill form and submit
+- Open DevTools → Network tab
+- Should see successful POST to backend
+- NO CORS errors in console
+
+🐛 TROUBLESHOOTING CORS ERRORS:
+-------------------------------
+
+Error: "Access-Control-Allow-Origin" header missing
+Solution:
+  ✅ Set CORS_ORIGIN=https://meet.xluma.in in Render
+  ✅ Restart backend service
+  ✅ Check backend logs show correct origins
+
+Error: Origin not allowed by CORS
+Solution:
+  ✅ Check CORS_ORIGIN matches frontend URL exactly
+  ✅ Remove any trailing slashes
+  ✅ Check for typos in domain name
+  ✅ Verify backend restarted after env var change
+
+Error: Preflight request failed
+Solution:
+  ✅ Backend must respond to OPTIONS requests
+  ✅ Check backend is running and accessible
+  ✅ Verify no firewall blocking requests
+
+Error: CORS works locally but not in production
+Solution:
+  ✅ Local uses http://localhost:3000 (allowed)
+  ✅ Production must use https://meet.xluma.in (check CORS_ORIGIN)
+  ✅ Verify env vars are set in Render, not just locally
+
+📝 BACKEND CORS CONFIGURATION:
+------------------------------
+
+The backend now uses a whitelist approach:
+- Checks incoming request origin
+- Allows if origin is in allowedOrigins array
+- Blocks and logs if origin not allowed
+- Allows requests with no origin (mobile apps, curl)
+
+Allowed origins are:
+1. http://localhost:3000 (hardcoded for dev)
+2. https://meet.xluma.in (hardcoded for prod)
+3. https://meet-x-luma.onrender.com (hardcoded for backend)
+4. process.env.CORS_ORIGIN (configurable via env var)
+
+This ensures security while allowing legitimate requests!

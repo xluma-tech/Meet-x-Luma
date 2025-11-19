@@ -9,11 +9,31 @@ require('dotenv').config();
 const app = express();
 const httpServer = http.createServer(app);
 
-// Middleware
+// Middleware - CORS Configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://meet.xluma.in',
+  'https://meet-x-luma.onrender.com',
+  process.env.CORS_ORIGIN
+].filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json());
 
 // Data storage path
@@ -54,7 +74,7 @@ const writeEvents = (data) => {
 // Socket.IO setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -338,7 +358,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 httpServer.listen(PORT, HOST, () => {
   console.log(`✓ Backend server running on http://${HOST}:${PORT}`);
   console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`✓ CORS Origin: ${process.env.CORS_ORIGIN || '*'}`);
+  console.log(`✓ CORS Allowed Origins:`, allowedOrigins);
   console.log(`✓ Data directory: ${DATA_DIR}`);
 });
 
