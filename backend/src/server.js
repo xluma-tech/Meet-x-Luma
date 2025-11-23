@@ -6,6 +6,15 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+// LiveKit SDK for token generation (optional - for SFU mode)
+let AccessToken;
+try {
+  const livekit = require('livekit-server-sdk');
+  AccessToken = livekit.AccessToken;
+} catch (err) {
+  console.log('LiveKit SDK not installed - running in P2P mode only');
+}
+
 const app = express();
 const httpServer = http.createServer(app);
 
@@ -192,6 +201,60 @@ app.get('/api/rooms/:roomId', (req, res) => {
     exists: true, 
     participants: room.size 
   });
+});
+
+// LiveKit token generation endpoint (for SFU mode)
+app.post('/api/token', (req, res) => {
+  if (!AccessToken) {
+    return res.status(501).json({ 
+      error: 'LiveKit not configured',
+      message: 'Install livekit-server-sdk to use SFU mode'
+    });
+  }
+
+  const { roomName, participantName } = req.body;
+  
+  if (!roomName || !participantName) {
+    return res.status(400).json({ 
+      error: 'Missing required fields',
+      message: 'roomName and participantName are required'
+    });
+  }
+
+  try {
+    const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
+    const apiSecret = process.env.LIVEKIT_API_SECRET || 'secret';
+    const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
+
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: participantName,
+      // Token expires in 24 hours
+      ttl: '24h',
+    });
+
+    at.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true,
+    });
+
+    const token = at.toJwt();
+
+    res.json({
+      token,
+      url: livekitUrl,
+      roomName,
+      participantName,
+    });
+  } catch (error) {
+    console.error('Error generating LiveKit token:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate token',
+      message: error.message
+    });
+  }
 });
 
 // Socket.IO connection handling

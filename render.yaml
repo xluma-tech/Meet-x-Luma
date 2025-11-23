@@ -1,0 +1,134 @@
+# Render Blueprint for Media Platform (Testing Only)
+# This deploys a simplified SFU architecture on Render
+# For production, use the Kubernetes deployment in infrastructure/
+
+services:
+  # Redis - For session state and pub/sub
+  - type: redis
+    name: media-platform-redis
+    plan: free  # 256MB, upgrade to starter ($10/mo) for production testing
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Allow all IPs
+
+  # PostgreSQL - For metadata storage
+  - type: pgsql
+    name: media-platform-db
+    plan: free  # 256MB, upgrade to starter ($7/mo) for production testing
+    databaseName: media_platform
+    databaseUser: media_platform
+    ipAllowList: []  # Allow all IPs
+
+  # LiveKit SFU - Media server
+  - type: web
+    name: livekit-sfu
+    runtime: docker
+    dockerfilePath: ./infrastructure/render/Dockerfile.livekit
+    dockerContext: .
+    plan: starter  # $7/mo - 512MB RAM, 0.5 CPU
+    healthCheckPath: /
+    envVars:
+      - key: LIVEKIT_KEYS
+        value: "devkey: secret"  # CHANGE IN PRODUCTION!
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: media-platform-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: media-platform-redis
+          property: port
+      # Optional: Add Twilio TURN credentials
+      # - key: TWILIO_TURN_USERNAME
+      #   sync: false
+      # - key: TWILIO_TURN_CREDENTIAL
+      #   sync: false
+
+  # Signaling Server - WebSocket signaling
+  - type: web
+    name: signaling
+    runtime: node
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    plan: starter  # $7/mo
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 4000
+      - key: NODE_ENV
+        value: production
+      - key: LIVEKIT_URL
+        fromService:
+          type: web
+          name: livekit-sfu
+          property: hostport
+      - key: LIVEKIT_API_KEY
+        value: devkey
+      - key: LIVEKIT_API_SECRET
+        value: secret  # CHANGE IN PRODUCTION!
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: media-platform-redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromService:
+          type: pgsql
+          name: media-platform-db
+          property: connectionString
+      - key: CORS_ORIGIN
+        fromService:
+          type: web
+          name: frontend
+          property: host
+
+  # Frontend - Next.js static site
+  - type: web
+    name: frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build && npm run export
+    staticPublishPath: frontend/out
+    plan: free
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NEXT_PUBLIC_SOCKET_URL
+        fromService:
+          type: web
+          name: signaling
+          property: hostport
+      - key: NEXT_PUBLIC_LIVEKIT_URL
+        fromService:
+          type: web
+          name: livekit-sfu
+          property: hostport
+      - key: NEXT_PUBLIC_APP_URL
+        fromService:
+          type: web
+          name: frontend
+          property: hostport
+
+# Cron jobs (optional)
+# - type: cron
+#   name: cleanup-old-rooms
+#   runtime: node
+#   schedule: "0 2 * * *"  # Daily at 2 AM
+#   buildCommand: cd backend && npm install
+#   startCommand: cd backend && node scripts/cleanup.js
+#   envVars:
+#     - key: DATABASE_URL
+#       fromService:
+#         type: pgsql
+#         name: media-platform-db
+#         property: connectionString

@@ -1,0 +1,292 @@
+# Default values for livekit-sfu
+# This is a YAML-formatted file.
+
+replicaCount: 3
+
+image:
+  repository: livekit/livekit-server
+  pullPolicy: IfNotPresent
+  tag: "v1.5.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "6789"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    add:
+    - NET_BIND_SERVICE
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# LiveKit configuration
+livekit:
+  # Port configuration
+  port: 7880
+  rtc:
+    port_range_start: 10000
+    port_range_end: 60000
+    use_external_ip: true
+    tcp_port: 7881
+    ice_servers:
+      - urls:
+        - "stun:stun.l.google.com:19302"
+        - "stun:stun1.l.google.com:19302"
+  
+  # Room configuration
+  room:
+    max_participants: 100
+    empty_timeout: 300s
+    departure_timeout: 20s
+    auto_create: true
+  
+  # Video configuration
+  video:
+    simulcast:
+      enabled: true
+      layers:
+        - quality: LOW
+          width: 320
+          height: 180
+          bitrate: 300000
+          framerate: 15
+        - quality: MEDIUM
+          width: 640
+          height: 360
+          bitrate: 800000
+          framerate: 30
+        - quality: HIGH
+          width: 1280
+          height: 720
+          bitrate: 2500000
+          framerate: 30
+    dynacast: true
+  
+  # Audio configuration
+  audio:
+    active_speaker_update_interval: 300ms
+    smooth_intervals: 3
+  
+  # Logging
+  logging:
+    level: info
+    sample: false
+  
+  # Keys (should be overridden in production)
+  keys:
+    api_key: "devkey"
+    api_secret: "secret"
+
+# Service configuration
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+  ports:
+    http:
+      port: 7880
+      targetPort: 7880
+      protocol: TCP
+    rtc-tcp:
+      port: 7881
+      targetPort: 7881
+      protocol: TCP
+    rtc-udp-start:
+      port: 10000
+      targetPort: 10000
+      protocol: UDP
+    metrics:
+      port: 6789
+      targetPort: 6789
+      protocol: TCP
+
+# Ingress configuration (for HTTP API)
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: livekit.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits
+resources:
+  limits:
+    cpu: 8000m
+    memory: 32Gi
+  requests:
+    cpu: 6000m
+    memory: 24Gi
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Pods
+      pods:
+        metric:
+          name: livekit_active_streams
+        target:
+          type: AverageValue
+          averageValue: "400"
+
+# Node selection
+nodeSelector:
+  role: sfu
+  tier: media-plane
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - livekit-sfu
+          topologyKey: kubernetes.io/hostname
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Monitoring
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Network Policy
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+      - podSelector:
+          matchLabels:
+            app: signaling
+      ports:
+      - protocol: TCP
+        port: 7880
+    - from:
+      - namespaceSelector: {}
+      ports:
+      - protocol: UDP
+        port: 10000
+        endPort: 60000
+  egress:
+    - to:
+      - namespaceSelector: {}
+    - to:
+      - podSelector:
+          matchLabels:
+            app: redis
+      ports:
+      - protocol: TCP
+        port: 6379
+
+# Persistence (for temporary files)
+persistence:
+  enabled: false
+  storageClass: "gp3"
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+# Redis configuration (for distributed state)
+redis:
+  enabled: true
+  host: "redis-master"
+  port: 6379
+  db: 0
+  password: ""
+
+# Environment variables
+env:
+  - name: LIVEKIT_NODE_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.podIP
+  - name: LIVEKIT_REGION
+    value: "us-east-1"
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Lifecycle hooks
+lifecycle:
+  preStop:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - sleep 30
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /
+    port: 7880
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /
+    port: 7880
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3

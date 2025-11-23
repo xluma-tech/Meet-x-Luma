@@ -1,0 +1,17 @@
+apiVersion: v2
+name: livekit-sfu
+description: LiveKit SFU deployment for media-platform
+type: application
+version: 1.0.0
+appVersion: "1.5.0"
+keywords:
+  - livekit
+  - sfu
+  - webrtc
+  - media
+home: https://livekit.io
+sources:
+  - https://github.com/livekit/livekit
+maintainers:
+  - name: Media Platform Team
+    email: sre@example.com

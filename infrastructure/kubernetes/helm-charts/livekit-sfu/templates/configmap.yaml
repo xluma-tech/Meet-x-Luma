@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "livekit-sfu.fullname" . }}
+  labels:
+    {{- include "livekit-sfu.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    port: {{ .Values.livekit.port }}
+    
+    rtc:
+      port_range_start: {{ .Values.livekit.rtc.port_range_start }}
+      port_range_end: {{ .Values.livekit.rtc.port_range_end }}
+      use_external_ip: {{ .Values.livekit.rtc.use_external_ip }}
+      tcp_port: {{ .Values.livekit.rtc.tcp_port }}
+      {{- if .Values.livekit.rtc.ice_servers }}
+      ice_servers:
+        {{- toYaml .Values.livekit.rtc.ice_servers | nindent 8 }}
+      {{- end }}
+    
+    {{- if .Values.redis.enabled }}
+    redis:
+      address: {{ .Values.redis.host }}:{{ .Values.redis.port }}
+      db: {{ .Values.redis.db }}
+      {{- if .Values.redis.password }}
+      password: {{ .Values.redis.password }}
+      {{- end }}
+    {{- end }}
+    
+    room:
+      max_participants: {{ .Values.livekit.room.max_participants }}
+      empty_timeout: {{ .Values.livekit.room.empty_timeout }}
+      departure_timeout: {{ .Values.livekit.room.departure_timeout }}
+      auto_create: {{ .Values.livekit.room.auto_create }}
+    
+    video:
+      {{- if .Values.livekit.video.simulcast.enabled }}
+      simulcast:
+        enabled: true
+        layers:
+          {{- range .Values.livekit.video.simulcast.layers }}
+          - quality: {{ .quality }}
+            width: {{ .width }}
+            height: {{ .height }}
+            bitrate: {{ .bitrate }}
+            framerate: {{ .framerate }}
+          {{- end }}
+      {{- end }}
+      dynacast: {{ .Values.livekit.video.dynacast }}
+    
+    audio:
+      active_speaker_update_interval: {{ .Values.livekit.audio.active_speaker_update_interval }}
+      {{- if .Values.livekit.audio.smooth_intervals }}
+      smooth_intervals: {{ .Values.livekit.audio.smooth_intervals }}
+      {{- end }}
+    
+    logging:
+      level: {{ .Values.livekit.logging.level }}
+      sample: {{ .Values.livekit.logging.sample }}
+    
+    keys:
+      {{- range $key, $value := .Values.livekit.keys }}
+      {{ $key }}: {{ $value }}
+      {{- end }}

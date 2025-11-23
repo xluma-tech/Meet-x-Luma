@@ -1,0 +1,25 @@
+FROM livekit/livekit-server:v1.5.0
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Copy configuration
+COPY infrastructure/render/livekit.yaml /etc/livekit.yaml
+
+# Create non-root user
+RUN useradd -m -u 1000 livekit && \
+    chown -R livekit:livekit /etc/livekit.yaml
+
+USER livekit
+
+# Expose ports
+# 7880: HTTP/WebSocket
+# 7881: WebRTC TCP fallback
+EXPOSE 7880 7881
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:7880/ || exit 1
+
+# Start LiveKit
+CMD ["livekit-server", "--config", "/etc/livekit.yaml"]

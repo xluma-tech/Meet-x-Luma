@@ -38,7 +38,7 @@ export default function EventPage() {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/events/${eventId}`)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/events/${eventId}`)
       .then((res) => {
         if (!res.ok) throw new Error('Event not found');
         return res.json();

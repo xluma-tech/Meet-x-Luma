@@ -1,0 +1,82 @@
+# LiveKit Configuration for Render
+# This is a simplified config for testing only
+
+port: 7880
+
+rtc:
+  # Render doesn't support custom UDP port ranges
+  # So we rely on TCP fallback
+  tcp_port: 7881
+  use_external_ip: true
+  
+  # ICE servers - using public STUN + optional TURN
+  ice_servers:
+    # Google's public STUN servers (free)
+    - urls:
+      - stun:stun.l.google.com:19302
+      - stun:stun1.l.google.com:19302
+      - stun:stun2.l.google.com:19302
+    
+    # Uncomment to use Twilio TURN (requires account)
+    # Get credentials from: https://www.twilio.com/console/voice/runtime/turn-credentials
+    # - urls:
+    #   - turn:global.turn.twilio.com:3478?transport=tcp
+    #   - turn:global.turn.twilio.com:3478?transport=udp
+    #   - turn:global.turn.twilio.com:443?transport=tcp
+    #   username: ${TWILIO_TURN_USERNAME}
+    #   credential: ${TWILIO_TURN_CREDENTIAL}
+    
+    # Or use Xirsys TURN (free tier available)
+    # Get credentials from: https://xirsys.com
+    # - urls:
+    #   - turn:your-channel.xirsys.com:80?transport=tcp
+    #   - turn:your-channel.xirsys.com:3478?transport=udp
+    #   username: ${XIRSYS_USERNAME}
+    #   credential: ${XIRSYS_CREDENTIAL}
+
+# Redis for distributed state (optional on Render)
+redis:
+  address: ${REDIS_HOST:localhost}:${REDIS_PORT:6379}
+  # Render Redis doesn't require password by default
+  # password: ${REDIS_PASSWORD}
+
+# Room configuration
+room:
+  # Limit participants for testing on Render's limited resources
+  max_participants: 20
+  empty_timeout: 300s
+  departure_timeout: 20s
+  auto_create: true
+
+# Video configuration
+video:
+  # Enable simulcast for better quality adaptation
+  simulcast:
+    enabled: true
+  # Dynamic casting - only send layers that are being consumed
+  dynacast: true
+
+# Audio configuration
+audio:
+  # Active speaker detection
+  active_speaker_update_interval: 300ms
+
+# API keys (CHANGE THESE IN PRODUCTION!)
+keys:
+  devkey: secret
+  # Add more keys as needed:
+  # prodkey: your-secret-key-here
+
+# Logging
+logging:
+  level: info
+  # Set to debug for troubleshooting
+  # level: debug
+  sample: false
+
+# Limits for Render's Starter plan (512MB RAM)
+limit:
+  # Limit bitrate to conserve bandwidth
+  video_bitrate: 2000000  # 2 Mbps max
+  # Limit tracks per participant
+  tracks_per_participant: 4
