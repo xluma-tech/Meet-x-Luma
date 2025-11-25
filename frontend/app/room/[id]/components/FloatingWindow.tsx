@@ -101,7 +101,20 @@ export function FloatingWindow({ participants, isVisible, onClose }: FloatingWin
 
   // Separate effect to update participants when they change
   useEffect(() => {
-    if (!isPopupOpenRef.current || !popupWindowRef.current || popupWindowRef.current.closed) {
+    // Check if popup is still valid before updating
+    if (!isPopupOpenRef.current || !popupWindowRef.current) {
+      return;
+    }
+
+    // Check if popup is closed
+    try {
+      if (popupWindowRef.current.closed) {
+        isPopupOpenRef.current = false;
+        return;
+      }
+    } catch (e) {
+      // Popup is inaccessible, consider it closed
+      isPopupOpenRef.current = false;
       return;
     }
 
@@ -440,7 +453,8 @@ export function FloatingWindow({ participants, isVisible, onClose }: FloatingWin
   const updatePopupParticipants = (popup: Window, participants: Participant[]) => {
     try {
       if (!popup || popup.closed) {
-        console.error('FloatingWindow: Popup is closed');
+        // Silently return if popup is closed - this is expected behavior
+        isPopupOpenRef.current = false;
         return;
       }
 

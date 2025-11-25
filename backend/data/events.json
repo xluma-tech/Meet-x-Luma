@@ -1,73 +1,20 @@
-direction right
-
-Issue type? [shape: oval, icon: file-text]
-
-BugPath [color: red] {
-  Bug [icon: bug, color: red]
-  Duplicate? [shape: diamond, icon: copy]
-  Mark duplicate [shape: oval, icon: copy]
-  Has repro? [shape: diamond, icon: repeat]
-  Ask for repro [shape: oval, icon: repeat]
+{
+  "events": [
+    {
+      "title": "adad",
+      "description": "asda",
+      "date": "2025-11-25",
+      "time": "20:01",
+      "id": "VT67c9Ikmr",
+      "createdAt": "2025-11-25T14:31:06.674Z"
+    },
+    {
+      "title": "faas",
+      "description": "asfa",
+      "date": "2025-11-25",
+      "time": "21:08",
+      "id": "w0DAMahiYu",
+      "createdAt": "2025-11-25T15:38:31.639Z"
+    }
+  ]
 }
-
-FeaturePath [color: green] {
-  Feature [icon: zap, color: green]
-  Well specced? [shape: diamond, icon: check-square]
-  Can be package? [shape: diamond, icon: package]
-  Define as package [shape: oval, icon: package]
-}
-
-Issue ready to claim [shape: oval, icon: send]
-
-Issue type? > Bug
-Bug > Duplicate?
-Duplicate? > Mark duplicate: Yes
-Duplicate? > Has repro?: No
-Has repro? > Issue ready to claim: Yes
-Has repro? > Ask for repro: No
-Issue type? > Feature
-Feature > Can be package?
-Can be package? > Well specced?: No
-Can be package? > Define as package: Yes
-Well specced? > Issue ready to claim: Yes
-
-Create the below idea's flow chart in above structure.
-
-
-1. User will come to the landing page of our website meet.xluma.in
-2. There the user will get two options
-   a. Proceed with Login
-   b. Proceed without Login
-3. If the user proceeds without login
-   a. user will get an option to enter his name and event name
-   b. He lands to a page with sharable meeting link and join button , the user who creates the meeting
-   is by default the host of that meeting, It will have the feautre to invite via email as well
-   c. Onclicking the join button user enters the video meeting room, 
-   d. by default it will be a private meeting, if host decides to open the meeting it will be a open meeting
-      participant does not require persmission to join the room for a open meeting
-   e. It has all features of meet and zoom open meeting link
-  
-   
-4.If user chooses with login feature
-  a. He gets login options page with google, facebook, email etc login
-  b. After login the user will have options like 
-  	i)  Create instant meeting with event name
-  	ii) Create meeting for future wt date and time and event name
-  c. After creating the meeting the host get
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    
-  	    

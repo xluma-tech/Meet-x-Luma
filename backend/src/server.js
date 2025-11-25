@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 require('dotenv').config();
 
 // LiveKit SDK for token generation (optional - for SFU mode)
@@ -28,16 +29,45 @@ app.use(express.json());
 // Data storage path
 const DATA_DIR = path.join(__dirname, '../data');
 const EVENTS_FILE = path.join(DATA_DIR, 'events.json');
+const MODELS_DIR = path.join(DATA_DIR, 'models');
 
-// Ensure data directory exists
+// Ensure data directories exist
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(MODELS_DIR)) {
+  fs.mkdirSync(MODELS_DIR, { recursive: true });
 }
 
 // Initialize events file if it doesn't exist
 if (!fs.existsSync(EVENTS_FILE)) {
   fs.writeFileSync(EVENTS_FILE, JSON.stringify({ events: [] }, null, 2));
 }
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, MODELS_DIR);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.glb', '.gltf'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .glb and .gltf files are allowed'));
+    }
+  }
+});
 
 // Helper functions for data management
 const readEvents = () => {
@@ -74,6 +104,9 @@ const io = new Server(httpServer, {
 
 // Store rooms and their participants
 const rooms = new Map();
+
+// Store 3D models per room: { roomId: { modelId, url, uploaderId, metadata, seq } }
+const roomModels = new Map();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -201,6 +234,75 @@ app.get('/api/rooms/:roomId', (req, res) => {
     exists: true, 
     participants: room.size 
   });
+});
+
+// 3D Model upload endpoint
+app.post('/api/models/upload', upload.single('model'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const { roomId, uploaderId, uploaderName } = req.body;
+    
+    if (!roomId || !uploaderId) {
+      // Clean up uploaded file
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Missing roomId or uploaderId' });
+    }
+
+    const modelId = req.file.filename;
+    const modelUrl = `/api/models/${modelId}`;
+    
+    const modelData = {
+      modelId,
+      url: modelUrl,
+      uploaderId,
+      uploaderName: uploaderName || 'Unknown',
+      filename: req.file.originalname,
+      size: req.file.size,
+      uploadedAt: new Date().toISOString(),
+      seq: 0
+    };
+
+    // Store model data (not published yet)
+    res.status(201).json(modelData);
+  } catch (error) {
+    console.error('Error uploading model:', error);
+    res.status(500).json({ error: 'Failed to upload model' });
+  }
+});
+
+// Serve 3D model files
+app.get('/api/models/:modelId', (req, res) => {
+  const { modelId } = req.params;
+  const modelPath = path.join(MODELS_DIR, modelId);
+  
+  if (!fs.existsSync(modelPath)) {
+    return res.status(404).json({ error: 'Model not found' });
+  }
+  
+  // Set appropriate headers for 3D models
+  const ext = path.extname(modelId).toLowerCase();
+  if (ext === '.glb') {
+    res.setHeader('Content-Type', 'model/gltf-binary');
+  } else if (ext === '.gltf') {
+    res.setHeader('Content-Type', 'model/gltf+json');
+  }
+  
+  res.sendFile(modelPath);
+});
+
+// Get current model for a room
+app.get('/api/rooms/:roomId/model', (req, res) => {
+  const { roomId } = req.params;
+  const model = roomModels.get(roomId);
+  
+  if (!model) {
+    return res.json({ model: null });
+  }
+  
+  res.json({ model });
 });
 
 // LiveKit token generation endpoint (for SFU mode)
@@ -366,6 +468,77 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 3D Model events
+  socket.on('model-publish', ({ roomId, modelData }) => {
+    try {
+      // Create canonical model record for the room
+      const modelRecord = {
+        ...modelData,
+        uploaderId: socket.id,
+        publishedAt: Date.now(),
+        seq: 0
+      };
+      
+      roomModels.set(roomId, modelRecord);
+      
+      // Broadcast to all participants in the room
+      io.to(roomId).emit('model-published', {
+        modelId: modelRecord.modelId,
+        url: modelRecord.url,
+        uploaderId: socket.id,
+        uploaderName: modelRecord.uploaderName,
+        metadata: modelRecord
+      });
+      
+      console.log(`Model ${modelRecord.modelId} published to room ${roomId} by ${socket.id}`);
+    } catch (err) {
+      console.error('Error publishing model:', err);
+      socket.emit('error', { message: 'Failed to publish model' });
+    }
+  });
+
+  socket.on('model-unpublish', ({ roomId }) => {
+    try {
+      const model = roomModels.get(roomId);
+      
+      // Verify the sender is the model owner
+      if (model && model.uploaderId === socket.id) {
+        roomModels.delete(roomId);
+        io.to(roomId).emit('model-unpublished', { modelId: model.modelId });
+        console.log(`Model ${model.modelId} unpublished from room ${roomId}`);
+      }
+    } catch (err) {
+      console.error('Error unpublishing model:', err);
+    }
+  });
+
+  socket.on('model-control', ({ roomId, modelId, seq, ts, payload }) => {
+    try {
+      const model = roomModels.get(roomId);
+      
+      // Verify the sender is the model owner
+      if (!model || model.uploaderId !== socket.id) {
+        console.log(`Unauthorized control event from ${socket.id} for model ${modelId}`);
+        return;
+      }
+      
+      // Update sequence number
+      if (seq > model.seq) {
+        model.seq = seq;
+      }
+      
+      // Rebroadcast control event to all other participants
+      socket.to(roomId).emit('model-control', {
+        modelId,
+        seq,
+        ts,
+        payload
+      });
+    } catch (err) {
+      console.error('Error handling model control:', err);
+    }
+  });
+
   socket.on('disconnect', () => {
     try {
       if (socket.roomId) {
@@ -374,8 +547,21 @@ io.on('connection', (socket) => {
           room.delete(socket.id);
           if (room.size === 0) {
             rooms.delete(socket.roomId);
+            // Clean up room model when room is empty
+            const model = roomModels.get(socket.roomId);
+            if (model) {
+              roomModels.delete(socket.roomId);
+            }
             console.log(`Room ${socket.roomId} deleted (empty)`);
           }
+        }
+
+        // If user was model owner, unpublish the model
+        const model = roomModels.get(socket.roomId);
+        if (model && model.uploaderId === socket.id) {
+          roomModels.delete(socket.roomId);
+          socket.to(socket.roomId).emit('model-unpublished', { modelId: model.modelId });
+          console.log(`Model ${model.modelId} auto-unpublished (owner left)`);
         }
 
         socket.to(socket.roomId).emit('user-left', {

@@ -1,11 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import SimplePeer from 'simple-peer';
 import { usePictureInPicture } from './hooks/usePictureInPicture';
+import { usePerformanceMonitor } from './hooks/usePerformanceMonitor';
 import { FloatingWindow } from './components/FloatingWindow';
+import { ModelViewer } from './components/ModelViewer';
+import { HandGestureControl } from './components/HandGestureControl';
+import { ModelUploadPanel } from './components/ModelUploadPanel';
+import dynamic from 'next/dynamic';
 
 // Development logging utility
 const isDev = process.env.NODE_ENV === 'development';
@@ -110,6 +115,21 @@ export default function RoomPage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserNodesRef = useRef<Map<string, AnalyserNode>>(new Map());
 
+  // 3D Model states
+  const [show3DPanel, setShow3DPanel] = useState(false);
+  const [uploadedModel, setUploadedModel] = useState<any>(null);
+  const [isModelPublished, setIsModelPublished] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [roomModel, setRoomModel] = useState<any>(null);
+  const [modelTransform, setModelTransform] = useState({
+    position: [0, 0, 0] as [number, number, number],
+    rotation: [0, 0, 0] as [number, number, number],
+    scale: [1, 1, 1] as [number, number, number]
+  });
+  const [handGestureEnabled, setHandGestureEnabled] = useState(false);
+  const [lowPowerMode, setLowPowerMode] = useState(false);
+  const modelSeqRef = useRef(0);
+
   const socketRef = useRef<Socket | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -130,6 +150,9 @@ export default function RoomPage() {
       }
     },
   });
+
+  // Performance monitoring (only in development)
+  usePerformanceMonitor(isDev);
 
   // Automatic floating window when tab is minimized
   // Shows screen share if active, otherwise shows local video
@@ -435,37 +458,45 @@ export default function RoomPage() {
       transports: ['websocket', 'polling'],
     });
 
-    // Optimize video constraints based on device
+    // Optimize video constraints based on device and power mode
     const getVideoConstraints = () => {
-      if (info.isMobile) {
+      const baseConstraints = info.isMobile ? {
+        width: { ideal: 640, max: 1280 },
+        height: { ideal: 480, max: 720 },
+        facingMode: 'user',
+      } : info.isTablet ? {
+        width: { ideal: 1280, max: 1920 },
+        height: { ideal: 720, max: 1080 },
+      } : {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      };
+      
+      // Apply low power mode constraints
+      if (lowPowerMode) {
         return {
-          width: { ideal: 640, max: 1280 },
+          width: { ideal: 640, max: 960 },
           height: { ideal: 480, max: 720 },
-          frameRate: { ideal: 24, max: 30 },
-          facingMode: 'user',
-        };
-      } else if (info.isTablet) {
-        return {
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30 },
-        };
-      } else {
-        return {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 },
+          frameRate: { ideal: 15, max: 20 },
+          facingMode: info.isMobile ? 'user' : undefined,
         };
       }
+      
+      return baseConstraints;
     };
 
     navigator.mediaDevices
       .getUserMedia({
-        video: getVideoConstraints(),
+        video: {
+          ...getVideoConstraints(),
+          frameRate: { ideal: 24, max: 30 } // Limit frame rate for better performance
+        },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1 // Mono audio for better performance
         },
       })
       .then((stream) => {
@@ -622,6 +653,42 @@ export default function RoomPage() {
           }
           screenPeersRef.current = screenPeersRef.current.filter((p) => p.userId !== userId);
           setScreenPeers(screenPeersRef.current);
+        });
+
+        // 3D Model events
+        socketRef.current?.on('model-published', ({ modelId, url, uploaderId, uploaderName, metadata }) => {
+          console.log('Model published:', modelId, 'by', uploaderName);
+          const baseUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+          const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
+          setRoomModel({
+            modelId,
+            url: fullUrl,
+            uploaderId,
+            uploaderName,
+            metadata
+          });
+          setModelTransform({
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1]
+          });
+        });
+
+        socketRef.current?.on('model-unpublished', ({ modelId }) => {
+          console.log('Model unpublished:', modelId);
+          setRoomModel(null);
+          setModelTransform({
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1]
+          });
+        });
+
+        socketRef.current?.on('model-control', ({ modelId, seq, ts, payload }) => {
+          // Apply control events from model owner
+          if (payload.transform) {
+            setModelTransform(payload.transform);
+          }
         });
       })
       .catch((err) => {
@@ -966,6 +1033,134 @@ export default function RoomPage() {
     }
   }, []);
 
+  // 3D Model functions
+  const handleModelUpload = useCallback(async (file: File) => {
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('model', file);
+      formData.append('roomId', roomId);
+      formData.append('uploaderId', socketRef.current?.id || '');
+      formData.append('uploaderName', userName);
+
+      const baseUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
+      const response = await fetch(`${baseUrl}/api/models/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+
+      const modelData = await response.json();
+      const fullUrl = modelData.url.startsWith('http') ? modelData.url : `${baseUrl}${modelData.url}`;
+      setUploadedModel({
+        ...modelData,
+        url: fullUrl
+      });
+      console.log('Model uploaded:', modelData);
+    } catch (error) {
+      console.error('Error uploading model:', error);
+      alert('Failed to upload model. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
+  }, [roomId, userName]);
+
+  const handleModelPublish = useCallback(() => {
+    if (uploadedModel && socketRef.current) {
+      socketRef.current.emit('model-publish', {
+        roomId,
+        modelData: uploadedModel
+      });
+      setIsModelPublished(true);
+      setHandGestureEnabled(true);
+      console.log('✅ Model published to room - Hand gestures ENABLED');
+      console.log('Published model:', uploadedModel);
+      console.log('Is controller:', true);
+    }
+  }, [uploadedModel, roomId]);
+
+  const handleModelUnpublish = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit('model-unpublish', { roomId });
+      setIsModelPublished(false);
+      setHandGestureEnabled(false);
+      console.log('Model unpublished from room');
+    }
+  }, [roomId]);
+
+  const handleModelTransformChange = useCallback((transform: typeof modelTransform) => {
+    setModelTransform(transform);
+    
+    // Send control event to server (throttled)
+    if (socketRef.current && isModelPublished) {
+      modelSeqRef.current += 1;
+      socketRef.current.emit('model-control', {
+        roomId,
+        modelId: uploadedModel?.modelId,
+        seq: modelSeqRef.current,
+        ts: Date.now(),
+        payload: { transform }
+      });
+    }
+  }, [roomId, uploadedModel, isModelPublished]);
+
+  const lastControlEventRef = useRef<number>(0);
+  const CONTROL_THROTTLE_MS = 50; // 20 Hz
+
+  const handleGesture = useCallback((gesture: any) => {
+    if (!isModelPublished || !uploadedModel) return;
+
+    const now = Date.now();
+    const shouldSendEvent = now - lastControlEventRef.current >= CONTROL_THROTTLE_MS;
+
+    setModelTransform(prev => {
+      const newTransform = { ...prev };
+
+      switch (gesture.type) {
+        case 'pinch_move':
+          // Move model in X/Y plane
+          newTransform.position = [
+            prev.position[0] + (gesture.delta.x || 0) * 1.5,
+            prev.position[1] + (gesture.delta.y || 0) * 1.5,
+            prev.position[2] + (gesture.delta.z || 0)
+          ];
+          break;
+        case 'rotate':
+          // Rotate around Y axis
+          newTransform.rotation = [
+            prev.rotation[0],
+            prev.rotation[1] + (gesture.delta.angle || 0),
+            prev.rotation[2]
+          ];
+          break;
+        case 'scale':
+          // Zoom in/out
+          const scaleChange = gesture.delta.scale || 1;
+          const clampedScale = Math.max(0.5, Math.min(5, prev.scale[0] * scaleChange));
+          newTransform.scale = [clampedScale, clampedScale, clampedScale];
+          break;
+      }
+
+      // Send control event (throttled)
+      if (socketRef.current && shouldSendEvent) {
+        modelSeqRef.current += 1;
+        lastControlEventRef.current = now;
+        socketRef.current.emit('model-control', {
+          roomId,
+          modelId: uploadedModel.modelId,
+          seq: modelSeqRef.current,
+          ts: now,
+          payload: { transform: newTransform }
+        });
+      }
+
+      return newTransform;
+    });
+  }, [roomId, uploadedModel, isModelPublished]);
+
   // Get the stream for floating window (screen share if active, otherwise local video)
   const getFloatingWindowStream = useCallback(() => {
     // If screen sharing, show screen share
@@ -1089,6 +1284,16 @@ export default function RoomPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setLowPowerMode(!lowPowerMode)}
+            className={`p-2 rounded-lg ${
+              lowPowerMode ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-700 hover:bg-gray-600'
+            } transition-colors hidden sm:flex items-center justify-center touch-manipulation`}
+            title={lowPowerMode ? 'Low Power Mode ON' : 'Low Power Mode OFF'}
+            aria-label={lowPowerMode ? 'Disable low power mode' : 'Enable low power mode'}
+          >
+            <span className="text-sm">⚡</span>
+          </button>
+          <button
             onClick={() => setPipEnabled(!pipEnabled)}
             className={`p-2 rounded-lg ${
               pipEnabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
@@ -1110,6 +1315,16 @@ export default function RoomPage() {
                 d="M7 4v16M17 4v16M3 8h18M3 12h18M3 16h18"
               />
             </svg>
+          </button>
+          <button
+            onClick={() => setShow3DPanel(!show3DPanel)}
+            className={`p-2 rounded-lg ${
+              show3DPanel ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-700 hover:bg-gray-600'
+            } transition-colors flex items-center justify-center touch-manipulation`}
+            title="3D Model Control"
+            aria-label="Toggle 3D model panel"
+          >
+            <span className="text-lg">🎨</span>
           </button>
           <button
           onClick={() => setShowChat(!showChat)}
@@ -1141,7 +1356,79 @@ export default function RoomPage() {
         </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 3D Model Panel */}
+        {show3DPanel && (
+          <div className="absolute md:relative inset-0 md:inset-auto w-full md:w-80 bg-gray-800 md:border-r border-gray-700 flex flex-col flex-shrink-0 z-40 p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">3D Model</h3>
+              <button
+                onClick={() => setShow3DPanel(false)}
+                className="md:hidden p-1 rounded hover:bg-gray-700 touch-manipulation"
+                aria-label="Close 3D panel"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <ModelUploadPanel
+              onUpload={handleModelUpload}
+              onPublish={handleModelPublish}
+              onUnpublish={handleModelUnpublish}
+              isPublished={isModelPublished}
+              isUploading={isUploading}
+              hasModel={!!uploadedModel}
+            />
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* 3D Model Viewer Overlay - Optimized size */}
+          {roomModel && (
+            <div className="absolute inset-4 md:top-4 md:right-4 md:left-auto md:bottom-auto md:w-[400px] md:h-[400px] z-30 bg-gray-900 rounded-lg shadow-2xl border-2 border-purple-500 overflow-hidden">
+              <div className="absolute top-2 left-2 bg-black bg-opacity-70 px-3 py-2 rounded text-sm z-10 flex items-center gap-2">
+                <span>🎨 {roomModel.uploaderName}&apos;s Model</span>
+                {isModelPublished && roomModel.uploaderId === socketRef.current?.id && (
+                  <span className="text-green-400 flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                    Controlling
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setRoomModel(null)}
+                className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 p-2 rounded z-10 transition-colors"
+                title="Close model viewer"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <ModelViewer
+                modelUrl={roomModel.url}
+                transform={modelTransform}
+                isController={isModelPublished && roomModel.uploaderId === socketRef.current?.id}
+                onTransformChange={handleModelTransformChange}
+              />
+              <div className="absolute bottom-2 left-2 right-2 bg-black bg-opacity-70 px-3 py-2 rounded text-xs z-10">
+                <p className="text-gray-300">
+                  {isModelPublished && roomModel.uploaderId === socketRef.current?.id 
+                    ? '👋 Use hand gestures or mouse to control • Scroll to zoom'
+                    : '👁️ View-only mode • Scroll to zoom'}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Hand Gesture Control - Uses main camera */}
+          {handGestureEnabled && isModelPublished && (
+            <HandGestureControl
+              enabled={handGestureEnabled}
+              videoElement={localVideoRef.current}
+              onGesture={handleGesture}
+            />
+          )}
+
           {screenSharingUserId ? (
             <>
               {/* Screen share view - Zoom-style layout: Large screen share with horizontal participant strip */}
@@ -1538,7 +1825,7 @@ export default function RoomPage() {
   );
 }
 
-function VideoCard({
+const VideoCard = React.memo(function VideoCard({
   peer,
   userName,
   stream,
@@ -1649,9 +1936,9 @@ function VideoCard({
       )}
     </>
   );
-}
+});
 
-function LocalScreenShare({
+const LocalScreenShare = React.memo(function LocalScreenShare({
   stream,
   userName,
 }: {
@@ -1793,9 +2080,9 @@ function LocalScreenShare({
       )}
     </>
   );
-}
+});
 
-function LocalVideoStrip({
+const LocalVideoStrip = React.memo(function LocalVideoStrip({
   stream,
   userName,
   isVideoEnabled,
@@ -1837,9 +2124,9 @@ function LocalVideoStrip({
       )}
     </>
   );
-}
+});
 
-function VideoCardStrip({
+const VideoCardStrip = React.memo(function VideoCardStrip({
   peer,
   userName,
   stream,
@@ -1975,4 +2262,4 @@ function VideoCardStrip({
       )}
     </>
   );
-}
+});
