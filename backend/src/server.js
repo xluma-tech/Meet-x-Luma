@@ -476,7 +476,8 @@ io.on('connection', (socket) => {
         ...modelData,
         uploaderId: socket.id,
         publishedAt: Date.now(),
-        seq: 0
+        seq: 0,
+        allowedControllers: [] // Initialize empty permissions list
       };
       
       roomModels.set(roomId, modelRecord);
@@ -487,6 +488,7 @@ io.on('connection', (socket) => {
         url: modelRecord.url,
         uploaderId: socket.id,
         uploaderName: modelRecord.uploaderName,
+        allowedControllers: modelRecord.allowedControllers,
         metadata: modelRecord
       });
       
@@ -516,8 +518,11 @@ io.on('connection', (socket) => {
     try {
       const model = roomModels.get(roomId);
       
-      // Verify the sender is the model owner
-      if (!model || model.uploaderId !== socket.id) {
+      // Verify the sender is the model owner or allowed controller
+      const isOwner = model && model.uploaderId === socket.id;
+      const isAllowed = model && model.allowedControllers && model.allowedControllers.includes(socket.id);
+      
+      if (!model || (!isOwner && !isAllowed)) {
         console.log(`Unauthorized control event from ${socket.id} for model ${modelId}`);
         return;
       }
@@ -527,15 +532,65 @@ io.on('connection', (socket) => {
         model.seq = seq;
       }
       
-      // Rebroadcast control event to all other participants
-      socket.to(roomId).emit('model-control', {
+      // Broadcast control event to ALL participants in the room (including sender)
+      // This ensures consistent state across all clients
+      io.to(roomId).emit('model-control', {
         modelId,
         seq,
         ts,
-        payload
+        payload,
+        uploaderId: socket.id // Include uploader ID for reference
       });
     } catch (err) {
       console.error('Error handling model control:', err);
+    }
+  });
+
+  socket.on('model-camera', ({ roomId, modelId, camera }) => {
+    try {
+      const model = roomModels.get(roomId);
+      
+      // Verify the sender is the model owner or allowed controller
+      const isOwner = model && model.uploaderId === socket.id;
+      const isAllowed = model && model.allowedControllers && model.allowedControllers.includes(socket.id);
+      
+      if (!model || (!isOwner && !isAllowed)) {
+        console.log(`Unauthorized camera event from ${socket.id} for model ${modelId}`);
+        return;
+      }
+      
+      // Broadcast camera state to ALL participants in the room (including sender)
+      io.to(roomId).emit('model-camera', {
+        modelId,
+        camera
+      });
+    } catch (err) {
+      console.error('Error handling model camera:', err);
+    }
+  });
+
+  socket.on('model-permissions', ({ roomId, modelId, allowedControllers }) => {
+    try {
+      const model = roomModels.get(roomId);
+      
+      // Verify the sender is the model owner
+      if (!model || model.uploaderId !== socket.id) {
+        console.log(`Unauthorized permission change from ${socket.id} for model ${modelId}`);
+        return;
+      }
+      
+      // Update allowed controllers
+      model.allowedControllers = allowedControllers;
+      
+      // Broadcast permission changes to ALL participants
+      io.to(roomId).emit('model-permissions', {
+        modelId,
+        allowedControllers
+      });
+      
+      console.log(`Permissions updated for model ${modelId}:`, allowedControllers);
+    } catch (err) {
+      console.error('Error handling model permissions:', err);
     }
   });
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Canvas, useLoader } from '@react-three/fiber';
+import { Canvas, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
@@ -13,12 +13,82 @@ interface ModelViewerProps {
     rotation?: [number, number, number];
     scale?: [number, number, number];
   };
+  cameraState?: {
+    position: [number, number, number];
+    target: [number, number, number];
+  };
   isController?: boolean;
   onTransformChange?: (transform: {
     position: [number, number, number];
     rotation: [number, number, number];
     scale: [number, number, number];
   }) => void;
+  onCameraChange?: (camera: {
+    position: [number, number, number];
+    target: [number, number, number];
+  }) => void;
+}
+
+// Component to sync camera state
+function CameraSync({ 
+  isController, 
+  cameraState,
+  onCameraChange 
+}: { 
+  isController: boolean;
+  cameraState?: { position: [number, number, number]; target: [number, number, number] };
+  onCameraChange?: (camera: { position: [number, number, number]; target: [number, number, number] }) => void;
+}) {
+  const { camera } = useThree();
+  const controlsRef = useRef<any>(null);
+  const lastUpdateRef = useRef<number>(0);
+  const THROTTLE_MS = 100; // 10 Hz for camera updates
+
+  // Get OrbitControls reference
+  useEffect(() => {
+    const controls = (camera as any).userData?.controls;
+    if (controls) {
+      controlsRef.current = controls;
+    }
+  }, [camera]);
+
+  // Broadcast camera changes (controller only)
+  useEffect(() => {
+    if (!isController || !onCameraChange) return;
+
+    const handleCameraChange = () => {
+      const now = Date.now();
+      if (now - lastUpdateRef.current < THROTTLE_MS) return;
+
+      const target = controlsRef.current?.target || new THREE.Vector3(0, 0, 0);
+      
+      onCameraChange({
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        target: [target.x, target.y, target.z]
+      });
+      
+      lastUpdateRef.current = now;
+    };
+
+    // Listen to camera changes
+    const interval = setInterval(handleCameraChange, THROTTLE_MS);
+    
+    return () => clearInterval(interval);
+  }, [isController, camera, onCameraChange]);
+
+  // Apply camera state (non-controller only)
+  useEffect(() => {
+    if (isController || !cameraState) return;
+
+    camera.position.set(...cameraState.position);
+    
+    if (controlsRef.current && cameraState.target) {
+      controlsRef.current.target.set(...cameraState.target);
+      controlsRef.current.update();
+    }
+  }, [isController, cameraState, camera]);
+
+  return null;
 }
 
 function Model({ 
@@ -36,54 +106,43 @@ function Model({
 }) {
   const gltf = useLoader(GLTFLoader, url);
   const meshRef = useRef<THREE.Group>(null);
-  const [localTransform, setLocalTransform] = useState({
-    position: transform?.position || [0, 0, 0] as [number, number, number],
-    rotation: transform?.rotation || [0, 0, 0] as [number, number, number],
-    scale: transform?.scale || [1, 1, 1] as [number, number, number]
-  });
+  const [isDragging, setIsDragging] = useState(false);
+  const lastUpdateRef = useRef<number>(0);
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const THROTTLE_MS = 50; // 20 Hz
+  
+  const { camera, gl } = useThree();
 
-  // Auto-scale and center the model on load with optimizations
+  // Auto-scale and center the model on load
   useEffect(() => {
     if (meshRef.current && gltf.scene) {
-      // Optimize model geometry and brighten materials
+      // Preserve original materials and textures
       gltf.scene.traverse((child: any) => {
         if (child.isMesh) {
-          // Enable frustum culling
           child.frustumCulled = true;
           
-          // Optimize and brighten materials
           if (child.material) {
-            child.material.precision = 'lowp';
-            
-            // Brighten the material
-            if (child.material.color) {
-              child.material.color.multiplyScalar(1.3); // Increase brightness by 30%
-            }
-            
-            // Increase metalness and roughness for better appearance
-            if (child.material.metalness !== undefined) {
-              child.material.metalness = Math.min(1, child.material.metalness * 1.2);
-            }
-            
-            // Optimize textures
+            // Ensure textures are properly loaded
             if (child.material.map) {
-              child.material.map.anisotropy = 2;
+              child.material.map.needsUpdate = true;
+              child.material.map.anisotropy = 4;
             }
+            if (child.material.normalMap) child.material.normalMap.needsUpdate = true;
+            if (child.material.roughnessMap) child.material.roughnessMap.needsUpdate = true;
+            if (child.material.metalnessMap) child.material.metalnessMap.needsUpdate = true;
+            child.material.needsUpdate = true;
           }
           
-          // Simplify geometry if too complex
           if (child.geometry) {
             child.geometry.computeBoundingSphere();
           }
         }
       });
       
-      // Calculate bounding box
+      // Calculate bounding box and scale
       const box = new THREE.Box3().setFromObject(gltf.scene);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
-      
-      // Calculate scale to fit in view (target size ~2 units)
       const maxDim = Math.max(size.x, size.y, size.z);
       const scale = maxDim > 0 ? 2 / maxDim : 1;
       
@@ -91,42 +150,117 @@ function Model({
       gltf.scene.position.set(-center.x, -center.y, -center.z);
       
       // Apply initial scale
-      setLocalTransform(prev => ({
-        ...prev,
-        scale: [scale, scale, scale]
-      }));
+      if (meshRef.current) {
+        meshRef.current.scale.set(scale, scale, scale);
+      }
       
       console.log('Model loaded & optimized - Size:', size, 'Scale:', scale);
       
-      // Notify parent that model is loaded
       if (onLoaded) {
         onLoaded();
       }
     }
   }, [gltf.scene, onLoaded]);
 
-  // Update mesh directly from transform prop (skip state to avoid re-renders)
+  // Update mesh from transform prop (for receiving broadcasts)
   useEffect(() => {
     if (meshRef.current && transform) {
-      meshRef.current.position.set(...(transform.position || [0, 0, 0]));
-      meshRef.current.rotation.set(...(transform.rotation || [0, 0, 0]));
-      meshRef.current.scale.set(...(transform.scale || [1, 1, 1]));
+      const pos = transform.position || [0, 0, 0];
+      const rot = transform.rotation || [0, 0, 0];
+      const scale = transform.scale || [1, 1, 1];
+      
+      meshRef.current.position.set(...pos);
+      meshRef.current.rotation.set(...rot);
+      meshRef.current.scale.set(...scale);
     }
   }, [transform]);
 
-  // Notify parent of transform changes (for controller only)
-  useEffect(() => {
-    if (isController && onTransformChange) {
-      onTransformChange(localTransform);
+  // Mouse drag handling for controller
+  const handlePointerDown = useCallback((e: any) => {
+    if (!isController) return;
+    e.stopPropagation();
+    setIsDragging(true);
+    // Store initial pointer position
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
+  }, [isController]);
+
+  const handlePointerMove = useCallback((e: any) => {
+    if (!isDragging || !meshRef.current || !isController || !lastPointerRef.current) return;
+    e.stopPropagation();
+    
+    const now = Date.now();
+    if (now - lastUpdateRef.current < THROTTLE_MS) return;
+
+    // Calculate movement delta
+    const deltaX = (e.clientX - lastPointerRef.current.x) * 0.01;
+    const deltaY = (e.clientY - lastPointerRef.current.y) * 0.01;
+    
+    // Update pointer position
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
+
+    // Move model based on mouse movement
+    meshRef.current.position.x += deltaX;
+    meshRef.current.position.y -= deltaY;
+    
+    // Apply boundaries
+    meshRef.current.position.x = Math.max(-5, Math.min(5, meshRef.current.position.x));
+    meshRef.current.position.y = Math.max(-5, Math.min(5, meshRef.current.position.y));
+    meshRef.current.position.z = Math.max(-5, Math.min(5, meshRef.current.position.z));
+    
+    if (onTransformChange) {
+      const pos = meshRef.current.position;
+      const rot = meshRef.current.rotation;
+      const scale = meshRef.current.scale;
+      onTransformChange({
+        position: [pos.x, pos.y, pos.z],
+        rotation: [rot.x, rot.y, rot.z],
+        scale: [scale.x, scale.y, scale.z]
+      });
+      console.log('Mouse drag - broadcasting position:', [pos.x, pos.y, pos.z]);
     }
-  }, [localTransform, isController, onTransformChange]);
+    
+    lastUpdateRef.current = now;
+  }, [isDragging, isController, onTransformChange]);
+
+  const handlePointerUp = useCallback(() => {
+    setIsDragging(false);
+    lastPointerRef.current = null;
+  }, []);
+
+  // Handle scroll for scaling (only for controller)
+  useEffect(() => {
+    if (!isController) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!meshRef.current || !onTransformChange) return;
+      
+      e.preventDefault();
+      const scaleDelta = e.deltaY > 0 ? 0.95 : 1.05;
+      const currentScale = meshRef.current.scale.x;
+      const newScale = Math.max(0.5, Math.min(5, currentScale * scaleDelta));
+      
+      meshRef.current.scale.set(newScale, newScale, newScale);
+      
+      const pos = meshRef.current.position;
+      const rot = meshRef.current.rotation;
+      onTransformChange({
+        position: [pos.x, pos.y, pos.z],
+        rotation: [rot.x, rot.y, rot.z],
+        scale: [newScale, newScale, newScale]
+      });
+    };
+
+    gl.domElement.addEventListener('wheel', handleWheel, { passive: false });
+    return () => gl.domElement.removeEventListener('wheel', handleWheel);
+  }, [isController, onTransformChange, gl]);
 
   return (
     <group 
       ref={meshRef}
-      position={localTransform.position}
-      rotation={localTransform.rotation}
-      scale={localTransform.scale}
+      onPointerDown={isController ? handlePointerDown : undefined}
+      onPointerMove={isController ? handlePointerMove : undefined}
+      onPointerUp={isController ? handlePointerUp : undefined}
+      onPointerLeave={isController ? handlePointerUp : undefined}
     >
       <primitive object={gltf.scene} />
     </group>
@@ -135,9 +269,11 @@ function Model({
 
 export function ModelViewer({ 
   modelUrl, 
-  transform, 
+  transform,
+  cameraState,
   isController = false,
-  onTransformChange 
+  onTransformChange,
+  onCameraChange
 }: ModelViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -186,13 +322,25 @@ export function ModelViewer({
             
             <PerspectiveCamera makeDefault position={[3, 2, 5]} fov={50} />
             <OrbitControls 
-              enablePan={isController}
-              enableZoom={true}
-              enableRotate={true}
+              enablePan={false}
+              enableZoom={isController}
+              enableRotate={isController}
               minDistance={1}
               maxDistance={20}
-              enableDamping={false}
+              enableDamping={true}
+              dampingFactor={0.05}
               makeDefault
+              onChange={(e) => {
+                // Store controls reference in camera userData
+                if (e?.target) {
+                  (e.target as any).object.userData.controls = e.target;
+                }
+              }}
+            />
+            <CameraSync 
+              isController={isController}
+              cameraState={cameraState}
+              onCameraChange={onCameraChange}
             />
             
             {/* Bright studio lighting setup */}
@@ -223,9 +371,6 @@ export function ModelViewer({
                 onLoaded={handleModelLoaded}
               />
             </React.Suspense>
-            
-            {/* Brighter grid */}
-            <gridHelper args={[10, 10, '#6666ff', '#444466']} />
           </Canvas>
         </>
       )}

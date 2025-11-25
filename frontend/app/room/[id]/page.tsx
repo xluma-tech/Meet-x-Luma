@@ -126,6 +126,11 @@ export default function RoomPage() {
     rotation: [0, 0, 0] as [number, number, number],
     scale: [1, 1, 1] as [number, number, number]
   });
+  const [cameraState, setCameraState] = useState({
+    position: [3, 2, 5] as [number, number, number],
+    target: [0, 0, 0] as [number, number, number]
+  });
+  const [allowedControllers, setAllowedControllers] = useState<string[]>([]);
   const [handGestureEnabled, setHandGestureEnabled] = useState(false);
   const [lowPowerMode, setLowPowerMode] = useState(false);
   const modelSeqRef = useRef(0);
@@ -656,7 +661,7 @@ export default function RoomPage() {
         });
 
         // 3D Model events
-        socketRef.current?.on('model-published', ({ modelId, url, uploaderId, uploaderName, metadata }) => {
+        socketRef.current?.on('model-published', ({ modelId, url, uploaderId, uploaderName, allowedControllers, metadata }) => {
           console.log('Model published:', modelId, 'by', uploaderName);
           const baseUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
           const fullUrl = url.startsWith('http') ? url : `${baseUrl}${url}`;
@@ -672,6 +677,9 @@ export default function RoomPage() {
             rotation: [0, 0, 0],
             scale: [1, 1, 1]
           });
+          // Initialize allowed controllers list
+          setAllowedControllers(allowedControllers || []);
+          console.log('Initial allowed controllers:', allowedControllers);
         });
 
         socketRef.current?.on('model-unpublished', ({ modelId }) => {
@@ -684,10 +692,27 @@ export default function RoomPage() {
           });
         });
 
-        socketRef.current?.on('model-control', ({ modelId, seq, ts, payload }) => {
-          // Apply control events from model owner
+        socketRef.current?.on('model-control', ({ modelId, seq, ts, payload, uploaderId }) => {
+          // Apply control events from model owner to all participants
           if (payload.transform) {
             setModelTransform(payload.transform);
+            console.log(`Model control update received - seq: ${seq}, from: ${uploaderId === socketRef.current?.id ? 'self' : 'owner'}`);
+          }
+        });
+
+        socketRef.current?.on('model-camera', ({ modelId, camera }) => {
+          // Apply camera updates from model owner
+          if (camera) {
+            setCameraState(camera);
+            console.log('Camera update received:', camera);
+          }
+        });
+
+        socketRef.current?.on('model-permissions', ({ modelId, allowedControllers }) => {
+          // Update allowed controllers list
+          if (allowedControllers) {
+            setAllowedControllers(allowedControllers);
+            console.log('Permissions updated:', allowedControllers);
           }
         });
       })
@@ -1104,8 +1129,73 @@ export default function RoomPage() {
         ts: Date.now(),
         payload: { transform }
       });
+      console.log('Emitting model-control:', { seq: modelSeqRef.current, position: transform.position });
     }
   }, [roomId, uploadedModel, isModelPublished]);
+
+  const handleCameraChange = useCallback((camera: typeof cameraState) => {
+    setCameraState(camera);
+    
+    // Send camera update to server (throttled)
+    if (socketRef.current && isModelPublished) {
+      socketRef.current.emit('model-camera', {
+        roomId,
+        modelId: uploadedModel?.modelId,
+        camera
+      });
+    }
+  }, [roomId, uploadedModel, isModelPublished]);
+
+  const handleResetModel = useCallback(() => {
+    const resetTransform = {
+      position: [0, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number]
+    };
+    
+    setModelTransform(resetTransform);
+    
+    // Broadcast reset to all participants
+    if (socketRef.current && isModelPublished) {
+      modelSeqRef.current += 1;
+      socketRef.current.emit('model-control', {
+        roomId,
+        modelId: uploadedModel?.modelId,
+        seq: modelSeqRef.current,
+        ts: Date.now(),
+        payload: { transform: resetTransform }
+      });
+      console.log('Model reset to center');
+    }
+  }, [roomId, uploadedModel, isModelPublished]);
+
+  const handlePermissionChange = useCallback((userIds: string[]) => {
+    setAllowedControllers(userIds);
+    
+    // Broadcast permission changes to server
+    if (socketRef.current && isModelPublished) {
+      socketRef.current.emit('model-permissions', {
+        roomId,
+        modelId: uploadedModel?.modelId,
+        allowedControllers: userIds
+      });
+      console.log('Emitting permissions:', userIds);
+    }
+  }, [roomId, uploadedModel, isModelPublished]);
+
+  // Debug: Log permission state changes
+  useEffect(() => {
+    console.log('=== Permission State Debug ===');
+    console.log('My socket ID:', socketRef.current?.id);
+    console.log('Allowed controllers:', allowedControllers);
+    console.log('Is model published:', isModelPublished);
+    console.log('Room model uploader:', roomModel?.uploaderId);
+    const isController = isModelPublished && 
+      (roomModel?.uploaderId === socketRef.current?.id || 
+       allowedControllers.includes(socketRef.current?.id || ''));
+    console.log('Am I controller?', isController);
+    console.log('============================');
+  }, [allowedControllers, isModelPublished, roomModel]);
 
   const lastControlEventRef = useRef<number>(0);
   const CONTROL_THROTTLE_MS = 50; // 20 Hz
@@ -1120,12 +1210,22 @@ export default function RoomPage() {
       const newTransform = { ...prev };
 
       switch (gesture.type) {
+        case 'reset':
+          // Reset model to center with default scale
+          newTransform.position = [0, 0, 0];
+          newTransform.rotation = [0, 0, 0];
+          newTransform.scale = [1, 1, 1];
+          console.log('Model reset to center');
+          break;
         case 'pinch_move':
-          // Move model in X/Y plane
+          // Move model in X/Y plane with boundaries
+          const newX = prev.position[0] + (gesture.delta.x || 0) * 1.5;
+          const newY = prev.position[1] + (gesture.delta.y || 0) * 1.5;
+          const newZ = prev.position[2] + (gesture.delta.z || 0);
           newTransform.position = [
-            prev.position[0] + (gesture.delta.x || 0) * 1.5,
-            prev.position[1] + (gesture.delta.y || 0) * 1.5,
-            prev.position[2] + (gesture.delta.z || 0)
+            Math.max(-5, Math.min(5, newX)),
+            Math.max(-5, Math.min(5, newY)),
+            Math.max(-5, Math.min(5, newZ))
           ];
           break;
         case 'rotate':
@@ -1155,6 +1255,7 @@ export default function RoomPage() {
           ts: now,
           payload: { transform: newTransform }
         });
+        console.log('Gesture control - emitting:', gesture.type, newTransform.position);
       }
 
       return newTransform;
@@ -1375,50 +1476,222 @@ export default function RoomPage() {
               onUpload={handleModelUpload}
               onPublish={handleModelPublish}
               onUnpublish={handleModelUnpublish}
+              onReset={handleResetModel}
+              onPermissionChange={handlePermissionChange}
               isPublished={isModelPublished}
               isUploading={isUploading}
               hasModel={!!uploadedModel}
+              participants={peers.map(p => ({ userId: p.userId, userName: p.userName }))}
+              allowedControllers={allowedControllers}
             />
           </div>
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden relative">
-          {/* 3D Model Viewer Overlay - Optimized size */}
-          {roomModel && (
-            <div className="absolute inset-4 md:top-4 md:right-4 md:left-auto md:bottom-auto md:w-[400px] md:h-[400px] z-30 bg-gray-900 rounded-lg shadow-2xl border-2 border-purple-500 overflow-hidden">
-              <div className="absolute top-2 left-2 bg-black bg-opacity-70 px-3 py-2 rounded text-sm z-10 flex items-center gap-2">
-                <span>🎨 {roomModel.uploaderName}&apos;s Model</span>
-                {isModelPublished && roomModel.uploaderId === socketRef.current?.id && (
-                  <span className="text-green-400 flex items-center gap-1">
-                    <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
-                    Controlling
-                  </span>
+          {/* Professional 3D Model Sharing Layout */}
+          {roomModel && isModelPublished ? (
+            <div className="flex-1 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-3 md:p-6 flex flex-col gap-3 md:gap-4 overflow-hidden">
+              {/* Main Content Area */}
+              <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
+                {/* Host View: Split Layout */}
+                {roomModel.uploaderId === socketRef.current?.id ? (
+                  <>
+                    {/* Left: Host Camera */}
+                    <div className="flex-1 relative group">
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                      <div className="relative h-full bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-gray-700/50">
+                        <video 
+                          ref={localVideoRef} 
+                          autoPlay 
+                          muted 
+                          playsInline 
+                          className="w-full h-full object-cover" 
+                        />
+                        <div className="absolute top-4 left-4 bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2 rounded-full shadow-lg backdrop-blur-sm">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                            <span className="text-white font-semibold text-sm">{userName} (Host)</span>
+                          </div>
+                        </div>
+                        {!isVideoEnabled && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
+                            <div className="text-center">
+                              <div className="w-24 h-24 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center">
+                                <span className="text-5xl">👤</span>
+                              </div>
+                              <p className="text-gray-400 text-sm">Camera Off</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Right: 3D Model */}
+                    <div className="flex-1 relative group">
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                      <div className="relative h-full bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-purple-500/50">
+                        <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20">
+                          <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 rounded-full shadow-lg backdrop-blur-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="text-2xl">🎨</span>
+                              <span className="text-white font-semibold text-sm">Your 3D Model</span>
+                              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                            </div>
+                          </div>
+                        </div>
+                        <ModelViewer
+                          modelUrl={roomModel.url}
+                          transform={modelTransform}
+                          cameraState={cameraState}
+                          isController={true}
+                          onTransformChange={handleModelTransformChange}
+                          onCameraChange={handleCameraChange}
+                        />
+                        <div className="absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-md px-4 py-3 rounded-xl border border-gray-700/50 z-20">
+                          <p className="text-gray-200 text-xs md:text-sm flex items-center gap-2">
+                            <span className="text-lg">👋</span>
+                            <span className="font-medium">Controls:</span>
+                            <span className="text-gray-400">👍 Reset • ✌️ Move • ✊ Zoom • ✋ Rotate • 🖱️ Drag & Scroll</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Participant View: Full Screen Model */
+                  <div className="flex-1 relative group">
+                    <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-pink-500/20 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="relative h-full bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-purple-500/50">
+                      <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20">
+                        <div className="bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 rounded-full shadow-lg backdrop-blur-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">🎨</span>
+                            <span className="text-white font-semibold text-sm">{roomModel.uploaderName}&apos;s Model</span>
+                            {allowedControllers.includes(socketRef.current?.id || '') && (
+                              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setRoomModel(null)}
+                          className="bg-red-600/90 hover:bg-red-600 p-2.5 rounded-full shadow-lg backdrop-blur-sm transition-all duration-200 hover:scale-110"
+                          title="Close model viewer"
+                        >
+                          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <ModelViewer
+                        modelUrl={roomModel.url}
+                        transform={modelTransform}
+                        cameraState={cameraState}
+                        isController={allowedControllers.includes(socketRef.current?.id || '')}
+                        onTransformChange={handleModelTransformChange}
+                        onCameraChange={handleCameraChange}
+                      />
+                      <div className="absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-md px-4 py-3 rounded-xl border border-gray-700/50 z-20">
+                        <p className="text-gray-200 text-xs md:text-sm flex items-center gap-2">
+                          {allowedControllers.includes(socketRef.current?.id || '') ? (
+                            <>
+                              <span className="text-lg">👋</span>
+                              <span className="font-medium">Controls:</span>
+                              <span className="text-gray-400">👍 Reset • ✌️ Move • ✊ Zoom • ✋ Rotate • 🖱️ Drag & Scroll</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-lg">👁️</span>
+                              <span className="font-medium text-gray-400">View-only mode</span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-              <button
-                onClick={() => setRoomModel(null)}
-                className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 p-2 rounded z-10 transition-colors"
-                title="Close model viewer"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-              <ModelViewer
-                modelUrl={roomModel.url}
-                transform={modelTransform}
-                isController={isModelPublished && roomModel.uploaderId === socketRef.current?.id}
-                onTransformChange={handleModelTransformChange}
-              />
-              <div className="absolute bottom-2 left-2 right-2 bg-black bg-opacity-70 px-3 py-2 rounded text-xs z-10">
-                <p className="text-gray-300">
-                  {isModelPublished && roomModel.uploaderId === socketRef.current?.id 
-                    ? '👋 Use hand gestures or mouse to control • Scroll to zoom'
-                    : '👁️ View-only mode • Scroll to zoom'}
-                </p>
+
+              {/* Professional Participant Strip */}
+              <div className="flex-shrink-0">
+                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-2 border border-gray-700/50">
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
+                    {/* Host tile for participants */}
+                    {roomModel.uploaderId !== socketRef.current?.id && (() => {
+                      const hostPeer = peers.find(p => p.userId === roomModel.uploaderId);
+                      return hostPeer ? (
+                        <div 
+                          className={`flex-shrink-0 w-36 md:w-44 h-24 md:h-28 relative group ${
+                            activeSpeaker === roomModel.uploaderId 
+                              ? 'ring-2 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)]' 
+                              : ''
+                          }`}
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                          <div className="relative h-full bg-gray-900 rounded-lg overflow-hidden border border-gray-700/50 shadow-lg">
+                            <VideoCardStrip 
+                              peer={hostPeer.peer} 
+                              userName={`${hostPeer.userName}`} 
+                              stream={hostPeer.stream} 
+                            />
+                            <div className="absolute top-1 left-1 bg-gradient-to-r from-blue-600 to-purple-600 px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-lg">
+                              HOST
+                            </div>
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+                    
+                    {/* Local video */}
+                    <div 
+                      className={`flex-shrink-0 w-36 md:w-44 h-24 md:h-28 relative group ${
+                        activeSpeaker === 'local' 
+                          ? 'ring-2 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)]' 
+                          : ''
+                      }`}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                      <div className="relative h-full bg-gray-900 rounded-lg overflow-hidden border border-gray-700/50 shadow-lg">
+                        <LocalVideoStrip 
+                          stream={localStreamRef.current} 
+                          userName={userName} 
+                          isVideoEnabled={isVideoEnabled}
+                        />
+                        {roomModel.uploaderId === socketRef.current?.id && (
+                          <div className="absolute top-1 left-1 bg-gradient-to-r from-blue-600 to-purple-600 px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-lg">
+                            HOST
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Other participants */}
+                    {sortedPeers
+                      .filter(peer => peer.userId !== roomModel.uploaderId)
+                      .map((peer) => (
+                        <div
+                          key={`strip-${peer.userId}`}
+                          className={`flex-shrink-0 w-36 md:w-44 h-24 md:h-28 relative group ${
+                            activeSpeaker === peer.userId 
+                              ? 'ring-2 ring-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.6)]' 
+                              : ''
+                          }`}
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-purple-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                          <div className="relative h-full bg-gray-900 rounded-lg overflow-hidden border border-gray-700/50 shadow-lg">
+                            <VideoCardStrip 
+                              key={`video-${peer.userId}-${peer.stream?.id || 'no-stream'}`}
+                              peer={peer.peer} 
+                              userName={peer.userName} 
+                              stream={peer.stream} 
+                            />
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Hand Gesture Control - Uses main camera */}
           {handGestureEnabled && isModelPublished && (

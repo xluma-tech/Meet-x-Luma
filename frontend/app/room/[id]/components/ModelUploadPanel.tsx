@@ -6,21 +6,46 @@ interface ModelUploadPanelProps {
   onUpload: (file: File) => Promise<void>;
   onPublish: () => void;
   onUnpublish: () => void;
+  onReset: () => void;
+  onPermissionChange: (userIds: string[]) => void;
   isPublished: boolean;
   isUploading: boolean;
   hasModel: boolean;
+  participants: Array<{ userId: string; userName: string }>;
+  allowedControllers: string[];
 }
 
 export function ModelUploadPanel({
   onUpload,
   onPublish,
   onUnpublish,
+  onReset,
+  onPermissionChange,
   isPublished,
   isUploading,
-  hasModel
+  hasModel,
+  participants,
+  allowedControllers
 }: ModelUploadPanelProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [showPermissions, setShowPermissions] = useState(false);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>(allowedControllers);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleToggleUser = (userId: string) => {
+    setSelectedUsers(prev => {
+      if (prev.includes(userId)) {
+        return prev.filter(id => id !== userId);
+      } else {
+        return [...prev, userId];
+      }
+    });
+  };
+
+  const handleApplyPermissions = () => {
+    onPermissionChange(selectedUsers);
+    setShowPermissions(false);
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -143,12 +168,77 @@ export function ModelUploadPanel({
 
           {isPublished && (
             <div className="space-y-2">
+              {/* Reset Button */}
+              <button
+                onClick={onReset}
+                className="w-full bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🎯</span>
+                <span>Reset Model to Center</span>
+              </button>
+
+              {/* Permission Management */}
+              <div className="bg-gray-700 rounded p-3">
+                <button
+                  onClick={() => setShowPermissions(!showPermissions)}
+                  className="w-full flex items-center justify-between text-sm font-semibold text-gray-200 hover:text-white transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>🔐</span>
+                    <span>Control Permissions</span>
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    {allowedControllers.length} allowed
+                  </span>
+                </button>
+
+                {showPermissions && (
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-gray-400 mb-2">
+                      Select participants who can control the model:
+                    </p>
+                    
+                    {participants.length === 0 ? (
+                      <p className="text-xs text-gray-500 text-center py-2">
+                        No other participants in the room
+                      </p>
+                    ) : (
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {participants.map(participant => (
+                          <label
+                            key={participant.userId}
+                            className="flex items-center gap-2 p-2 hover:bg-gray-600 rounded cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedUsers.includes(participant.userId)}
+                              onChange={() => handleToggleUser(participant.userId)}
+                              className="w-4 h-4 rounded"
+                            />
+                            <span className="text-sm text-gray-200">
+                              {participant.userName}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleApplyPermissions}
+                      className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm font-semibold transition-colors mt-2"
+                    >
+                      Apply Permissions
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-blue-900 bg-opacity-50 rounded p-2 text-xs text-center">
                 <p className="text-blue-300">
                   👋 Use hand gestures to control the model
                 </p>
                 <p className="text-gray-400 mt-1">
-                  Pinch to move • Open hand to rotate • 3 fingers to scale
+                  👍 Reset • ✌️ Move • ✊ Zoom • ✋ Rotate
                 </p>
               </div>
             </div>

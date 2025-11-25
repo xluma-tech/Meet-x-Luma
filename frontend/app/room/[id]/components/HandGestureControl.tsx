@@ -6,7 +6,7 @@ interface HandGestureControlProps {
   enabled: boolean;
   videoElement: HTMLVideoElement | null;
   onGesture: (gesture: {
-    type: 'pinch_move' | 'rotate' | 'scale';
+    type: 'pinch_move' | 'rotate' | 'scale' | 'reset';
     delta: { x?: number; y?: number; z?: number; angle?: number; scale?: number };
   }) => void;
 }
@@ -65,8 +65,15 @@ export function HandGestureControl({ enabled, videoElement, onGesture }: HandGes
       Math.pow(middleTip.y - wrist.y, 2)
     ) > 0.15;
     
+    // Check thumb position for thumbs up
+    const thumbUp = thumbTip.y < wrist.y - 0.1; // Thumb is significantly above wrist
+    const otherFingersClosed = !indexExtended && !middleExtended;
+    
+    // Gesture 0: THUMBS UP (thumb up, other fingers closed) - RESET
+    const isThumbsUp = thumbUp && otherFingersClosed;
+    
     // Gesture 1: FIST (all fingers closed) - ZOOM
-    const isFist = !indexExtended && !middleExtended;
+    const isFist = !indexExtended && !middleExtended && !thumbUp;
     
     // Gesture 2: PEACE SIGN (index + middle extended, others closed) - MOVE
     const isPeaceSign = indexExtended && middleExtended && indexMiddleDist < 0.08;
@@ -74,7 +81,16 @@ export function HandGestureControl({ enabled, videoElement, onGesture }: HandGes
     // Gesture 3: OPEN HAND (all fingers extended) - ROTATE
     const isOpenHand = indexExtended && middleExtended && indexMiddleDist > 0.08;
     
-    if (isFist) {
+    if (isThumbsUp) {
+      // RESET: Thumbs up - reset model to center
+      if (!lastGestureRef.current || lastGestureRef.current.distance !== -1) {
+        onGesture({
+          type: 'reset',
+          delta: {}
+        });
+        lastGestureRef.current = { x: 0, y: 0, distance: -1 }; // Mark as reset gesture
+      }
+    } else if (isFist) {
       // ZOOM: Closed fist - move hand up (zoom in) or down (zoom out)
       const fistY = wrist.y;
       
