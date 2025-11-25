@@ -19,9 +19,14 @@ try {
 const app = express();
 const httpServer = http.createServer(app);
 
+const allowedOrigins = (process.env.CORS_ORIGIN || "*")
+  .split(",")
+  .map(o => o.trim());
+
+
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: allowedOrigins || '*',
   credentials: true
 }));
 app.use(express.json());
