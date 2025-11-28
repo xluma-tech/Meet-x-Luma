@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Canvas, useLoader, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import * as THREE from 'three';
 
 interface ModelViewerProps {
@@ -104,37 +105,131 @@ function Model({
   onTransformChange?: ModelViewerProps['onTransformChange'];
   onLoaded?: () => void;
 }) {
-  const gltf = useLoader(GLTFLoader, url);
+  // Configure GLTF loader with DRACO support
+  const gltf = useLoader(GLTFLoader, url, (loader) => {
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+    dracoLoader.setDecoderConfig({ type: 'js' });
+    loader.setDRACOLoader(dracoLoader);
+  });
+  
   const meshRef = useRef<THREE.Group>(null);
   const [isDragging, setIsDragging] = useState(false);
   const lastUpdateRef = useRef<number>(0);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const THROTTLE_MS = 50; // 20 Hz
   
-  const { camera, gl } = useThree();
+  const { gl } = useThree();
 
   // Auto-scale and center the model on load
   useEffect(() => {
     if (meshRef.current && gltf.scene) {
+      console.log('Processing GLTF scene:', gltf);
+      
       // Preserve original materials and textures
       gltf.scene.traverse((child: any) => {
         if (child.isMesh) {
-          child.frustumCulled = true;
+          console.log('Mesh found:', child.name, 'Material:', child.material);
+          
+          child.frustumCulled = false; // Disable frustum culling to ensure visibility
+          child.castShadow = false;
+          child.receiveShadow = false;
           
           if (child.material) {
-            // Ensure textures are properly loaded
-            if (child.material.map) {
-              child.material.map.needsUpdate = true;
-              child.material.map.anisotropy = 4;
+            // Handle both single material and material arrays
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            
+            materials.forEach((mat: any, index: number) => {
+              console.log(`Material ${index}:`, {
+                type: mat.type,
+                hasMap: !!mat.map,
+                hasColor: !!mat.color,
+                color: mat.color,
+                hasVertexColors: child.geometry?.attributes?.color !== undefined
+              });
+              
+              // Don't clone, modify in place to preserve texture references
+              const material = mat;
+              
+              // Enable vertex colors if they exist
+              if (child.geometry?.attributes?.color) {
+                material.vertexColors = true;
+                console.log('Vertex colors enabled for', child.name);
+              }
+              
+              // Configure material for proper rendering
+              material.side = THREE.DoubleSide; // Render both sides
+              material.flatShading = false;
+              
+              // Ensure textures are properly configured with correct color space
+              if (material.map) {
+                console.log('Configuring base color texture for', child.name);
+                material.map.colorSpace = THREE.SRGBColorSpace;
+                material.map.needsUpdate = true;
+                material.map.anisotropy = Math.min(16, gl.capabilities.getMaxAnisotropy());
+                material.map.generateMipmaps = true;
+                material.map.minFilter = THREE.LinearMipmapLinearFilter;
+                material.map.magFilter = THREE.LinearFilter;
+                material.map.wrapS = THREE.RepeatWrapping;
+                material.map.wrapT = THREE.RepeatWrapping;
+              }
+              
+              // Configure other texture maps
+              if (material.normalMap) {
+                material.normalMap.needsUpdate = true;
+                console.log('Normal map found for', child.name);
+              }
+              if (material.roughnessMap) {
+                material.roughnessMap.needsUpdate = true;
+              }
+              if (material.metalnessMap) {
+                material.metalnessMap.needsUpdate = true;
+              }
+              if (material.emissiveMap) {
+                material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+                material.emissiveMap.needsUpdate = true;
+              }
+              if (material.aoMap) {
+                material.aoMap.needsUpdate = true;
+              }
+              
+              // Ensure material color is visible
+              if (material.color) {
+                // Keep existing color but ensure it's not black
+                if (material.color.r === 0 && material.color.g === 0 && material.color.b === 0) {
+                  material.color.setHex(0xffffff);
+                  console.log('Fixed black color for', child.name);
+                }
+              } else {
+                material.color = new THREE.Color(0xffffff);
+              }
+              
+              // Configure material properties for visibility
+              material.transparent = material.transparent || false;
+              material.opacity = material.opacity !== undefined ? material.opacity : 1.0;
+              material.depthWrite = true;
+              material.depthTest = true;
+              
+              // For MeshStandardMaterial, ensure proper PBR values
+              if (material.type === 'MeshStandardMaterial') {
+                if (material.roughness === undefined) material.roughness = 0.5;
+                if (material.metalness === undefined) material.metalness = 0.0;
+              }
+              
+              material.needsUpdate = true;
+            });
+            
+            // Update child material reference if it was an array
+            if (Array.isArray(child.material)) {
+              child.material = materials;
             }
-            if (child.material.normalMap) child.material.normalMap.needsUpdate = true;
-            if (child.material.roughnessMap) child.material.roughnessMap.needsUpdate = true;
-            if (child.material.metalnessMap) child.material.metalnessMap.needsUpdate = true;
-            child.material.needsUpdate = true;
           }
           
           if (child.geometry) {
             child.geometry.computeBoundingSphere();
+            if (!child.geometry.attributes.normal) {
+              child.geometry.computeVertexNormals();
+            }
           }
         }
       });
@@ -303,20 +398,35 @@ export function ModelViewer({
           )}
           <Canvas 
             shadows={false}
-            dpr={[0.75, 1]}
+            dpr={[0.75, 1.5]}
             frameloop="always"
             performance={{ min: 0.1 }}
             gl={{ 
               antialias: true,
-              powerPreference: 'high-performance',
+              powerPreference: 'default',
               alpha: false,
               stencil: false,
               depth: true,
               logarithmicDepthBuffer: false,
-              preserveDrawingBuffer: false
+              preserveDrawingBuffer: false,
+              outputColorSpace: THREE.SRGBColorSpace,
+              toneMapping: THREE.ACESFilmicToneMapping,
+              toneMappingExposure: 1.0
+            }}
+            onCreated={({ gl }) => {
+              // Ensure proper texture encoding for all devices
+              gl.outputColorSpace = THREE.SRGBColorSpace;
+              gl.toneMapping = THREE.ACESFilmicToneMapping;
+              gl.toneMappingExposure = 1.0;
+              
+              console.log('WebGL Renderer initialized:', {
+                maxTextureSize: gl.capabilities.maxTextureSize,
+                maxAnisotropy: gl.capabilities.getMaxAnisotropy(),
+                colorSpace: gl.outputColorSpace
+              });
             }}
           >
-            {/* Bright studio-like background */}
+            {/* Background */}
             <color attach="background" args={['#1a1a2e']} />
             <fog attach="fog" args={['#1a1a2e', 10, 50]} />
             
@@ -343,23 +453,22 @@ export function ModelViewer({
               onCameraChange={onCameraChange}
             />
             
-            {/* Bright studio lighting setup */}
-            <ambientLight intensity={1.2} />
+            {/* Neutral lighting setup for accurate texture/color display */}
+            <ambientLight intensity={1.0} color="#ffffff" />
             <directionalLight 
               position={[5, 5, 5]} 
-              intensity={1.5}
+              intensity={0.5}
               color="#ffffff"
             />
             <directionalLight 
-              position={[-5, 3, -5]} 
-              intensity={0.8}
+              position={[-5, -3, -5]} 
+              intensity={0.3}
               color="#ffffff"
             />
-            <pointLight position={[0, 5, 0]} intensity={0.5} color="#ffffff" />
             <hemisphereLight 
               color="#ffffff" 
-              groundColor="#444466" 
-              intensity={0.6} 
+              groundColor="#888888" 
+              intensity={0.5} 
             />
             
             <React.Suspense fallback={null}>
