@@ -12,6 +12,8 @@ const tokenRoutes = require('./tokenRoutes');
 const authRoutes = require('./authRoutes');
 const guestRoutes = require('./guestRoutes');
 const meetingRoutes = require('./meetingRoutes');
+const notificationRoutes = require('./notificationRoutes');
+const joinRequestRoutes = require('./joinRequestRoutes');
 
 // Mount routes
 router.use('/health', healthRoutes);
@@ -22,5 +24,7 @@ router.use('/api/token', tokenRoutes);
 router.use('/api/auth', authRoutes);
 router.use('/api/guest', guestRoutes);
 router.use('/api/meetings', meetingRoutes);
+router.use('/api/notifications', notificationRoutes);
+router.use('/api/join-requests', joinRequestRoutes);
 
 module.exports = router;

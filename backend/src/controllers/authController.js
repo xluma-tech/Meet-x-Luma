@@ -2,7 +2,7 @@ const User = require('../models/User');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 
 /**
- * Sync user from Auth0 to MongoDB
+ * Sync user from Auth0 to MongoDB (handles both signup and signin)
  */
 const syncUser = async (req, res) => {
   try {
@@ -14,6 +14,7 @@ const syncUser = async (req, res) => {
 
     // Check if user exists
     let user = await User.findByAuth0Id(auth0Id);
+    let isNewUser = false;
 
     if (!user) {
       // Create new user
@@ -24,22 +25,25 @@ const syncUser = async (req, res) => {
         picture,
         role: 'participant',
       });
-
-      return sendSuccess(res, {
-        message: 'User created successfully',
-        user,
-        isNewUser: true,
-      }, 201);
+      isNewUser = true;
     } else {
-      // Update last login
-      await User.updateLastLogin(auth0Id);
-
-      return sendSuccess(res, {
-        message: 'User updated successfully',
-        user,
-        isNewUser: false,
-      });
+      // Update profile data on login
+      await User.updateProfile(auth0Id, { name, picture });
+      user = await User.findByAuth0Id(auth0Id);
     }
+
+    return sendSuccess(res, {
+      message: isNewUser ? 'User registered successfully' : 'User synced successfully',
+      user: {
+        id: user._id,
+        auth0Id: user.auth0Id,
+        email: user.email,
+        name: user.name,
+        picture: user.picture,
+        role: user.role,
+      },
+      isNewUser,
+    });
   } catch (error) {
     console.error('Error syncing user:', error);
     return sendError(res, 'Failed to sync user', 500);

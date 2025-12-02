@@ -50,6 +50,18 @@ class User {
   static async findAll(filter = {}, options = {}) {
     return await this.collection.find(filter, options).toArray();
   }
+
+  static async updateProfile(auth0Id, profileData) {
+    const updateData = {
+      ...profileData,
+      updatedAt: new Date()
+    };
+    
+    return await this.collection.updateOne(
+      { auth0Id },
+      { $set: updateData }
+    );
+  }
 }
 
 module.exports = User;

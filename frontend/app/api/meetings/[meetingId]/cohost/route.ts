@@ -5,7 +5,7 @@ const BACKEND_API_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://local
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { meetingId: string } }
+  { params }: { params: Promise<{ meetingId: string }> }
 ) {
   try {
     const session = await auth0.getSession();
@@ -17,8 +17,11 @@ export async function POST(
     const body = await req.json();
     const { participantAuth0Id } = body;
 
+    // Await params in Next.js 15+
+    const { meetingId } = await params;
+
     // Call backend API to assign cohost
-    const response = await fetch(`${BACKEND_API_URL}/api/meetings/${params.meetingId}/cohost`, {
+    const response = await fetch(`${BACKEND_API_URL}/api/meetings/${meetingId}/cohost`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

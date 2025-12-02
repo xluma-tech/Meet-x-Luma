@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
-// Sync user from Auth0 to MongoDB
+// Sync user from Auth0 to MongoDB (handles both signup and signin)
 router.post('/sync', authController.syncUser);
 
 // Get user profile

@@ -7,6 +7,7 @@ const config = require('./config/environment');
 const { createSocketServer } = require('./socket/socketConfig');
 const { initializeSocketHandlers } = require('./socket/socketHandlers');
 const { connectDatabase, closeDatabase } = require('./config/database');
+const meetingCleanupService = require('./services/meetingCleanupService');
 
 // Initialize database connection
 const startServer = async () => {
@@ -44,6 +45,9 @@ const startServer = async () => {
       console.log(`✓ CORS Origin: ${config.cors.origin}`);
     });
 
+    // Start meeting cleanup service
+    meetingCleanupService.start();
+
     return httpServer;
   } catch (error) {
     console.error('Failed to start server:', error);
@@ -57,6 +61,7 @@ const httpServer = startServer();
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, closing server...');
+  meetingCleanupService.stop();
   const server = await httpServer;
   server.close(async () => {
     await closeDatabase();
@@ -67,6 +72,7 @@ process.on('SIGTERM', async () => {
 
 process.on('SIGINT', async () => {
   console.log('SIGINT received, closing server...');
+  meetingCleanupService.stop();
   const server = await httpServer;
   server.close(async () => {
     await closeDatabase();

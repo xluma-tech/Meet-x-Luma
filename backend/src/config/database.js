@@ -38,9 +38,19 @@ const createIndexes = async () => {
     await db.collection('users').createIndex({ email: 1 });
     
     // Meetings collection indexes
+    await db.collection('meetings').createIndex({ meetingCode: 1 }, { unique: true });
     await db.collection('meetings').createIndex({ hostAuth0Id: 1 });
+    await db.collection('meetings').createIndex({ guestHostId: 1 });
     await db.collection('meetings').createIndex({ status: 1 });
+    await db.collection('meetings').createIndex({ type: 1 });
     await db.collection('meetings').createIndex({ createdAt: -1 });
+    await db.collection('meetings').createIndex({ 'invitations.email': 1 });
+    
+    // Notifications collection indexes
+    await db.collection('notifications').createIndex({ auth0Id: 1 });
+    await db.collection('notifications').createIndex({ email: 1 });
+    await db.collection('notifications').createIndex({ read: 1 });
+    await db.collection('notifications').createIndex({ createdAt: -1 });
     
     // Guest sessions collection indexes
     await db.collection('guestSessions').createIndex({ guestId: 1 }, { unique: true });

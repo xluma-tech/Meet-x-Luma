@@ -1,0 +1,131 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { meetingService } from '@/lib/meetingService';
+import { useUser } from '@/lib/useUser';
+import JoinRequestDialog from '@/components/meeting/JoinRequestDialog';
+import JoinRequestPending from '@/components/meeting/JoinRequestPending';
+
+export default function RoomWrapper({ children }: { children: React.ReactNode }) {
+  const params = useParams();
+  const router = useRouter();
+  const { user } = useUser();
+  const [isValidating, setIsValidating] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showJoinRequest, setShowJoinRequest] = useState(false);
+  const [requestPending, setRequestPending] = useState(false);
+  const [meeting, setMeeting] = useState<any>(null);
+
+  useEffect(() => {
+    validateMeeting();
+  }, [params.id]);
+
+  const validateMeeting = async () => {
+    const meetingCode = params.id as string;
+
+    if (!meetingCode) {
+      router.push('/room/not-found');
+      return;
+    }
+
+    try {
+      // Fetch meeting
+      const fetchedMeeting = await meetingService.getMeeting(meetingCode);
+
+      if (!fetchedMeeting) {
+        router.push('/room/not-found');
+        return;
+      }
+
+      setMeeting(fetchedMeeting);
+
+      // Check if meeting has ended
+      if (fetchedMeeting.status === 'ended') {
+        setError('This meeting has ended');
+        setTimeout(() => router.push('/'), 3000);
+        return;
+      }
+
+      // For private meetings, check access
+      if (fetchedMeeting.type === 'private') {
+        const canJoin = meetingService.canJoinMeeting(fetchedMeeting, user?.email, user?.sub);
+
+        if (!canJoin) {
+          // Show join request dialog
+          setShowJoinRequest(true);
+          setIsValidating(false);
+          return;
+        }
+      }
+
+      // Update meeting status to active if it's scheduled
+      if (fetchedMeeting.status === 'scheduled') {
+        await meetingService.updateMeetingStatus(fetchedMeeting._id, 'active');
+      }
+
+      setIsValidating(false);
+    } catch (err) {
+      console.error('Error validating meeting:', err);
+      router.push('/room/not-found');
+    }
+  };
+
+  const handleRequestSent = () => {
+    setShowJoinRequest(false);
+    setRequestPending(true);
+  };
+
+  const handleCancelRequest = () => {
+    router.push('/');
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h2 className="text-2xl font-bold text-white mb-2">{error}</h2>
+          <p className="text-gray-300">Redirecting you to homepage...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (requestPending && meeting) {
+    return (
+      <JoinRequestPending
+        meetingCode={meeting.meetingCode}
+        meetingTitle={meeting.title}
+        requesterName={user?.name || 'Guest'}
+      />
+    );
+  }
+
+  if (showJoinRequest && meeting) {
+    return (
+      <JoinRequestDialog
+        meetingCode={meeting.meetingCode}
+        meetingTitle={meeting.title}
+        userName={user?.name}
+        userEmail={user?.email}
+        userAuth0Id={user?.sub}
+        onRequestSent={handleRequestSent}
+        onCancel={handleCancelRequest}
+      />
+    );
+  }
+
+  if (isValidating) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white text-lg">Validating meeting...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}

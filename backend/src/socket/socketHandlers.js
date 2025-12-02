@@ -2,6 +2,8 @@
  * Socket.IO event handlers
  */
 const { SOCKET_EVENTS, MESSAGES } = require('../config/constants');
+const Meeting = require('../models/Meeting');
+const meetingCleanupService = require('../services/meetingCleanupService');
 
 /**
  * Initialize socket handlers
@@ -11,7 +13,7 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
     console.log('User connected:', socket.id);
 
     // Join room handler
-    socket.on(SOCKET_EVENTS.JOIN_ROOM, ({ roomId, userName }) => {
+    socket.on(SOCKET_EVENTS.JOIN_ROOM, async ({ roomId, userName }) => {
       try {
         socket.join(roomId);
         socket.userName = userName;
@@ -20,7 +22,25 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
         if (!rooms.has(roomId)) {
           rooms.set(roomId, new Set());
         }
+        
+        const isFirstUser = rooms.get(roomId).size === 0;
         rooms.get(roomId).add(socket.id);
+
+        // Update meeting activity timestamp and status
+        try {
+          const meeting = await Meeting.findByMeetingCode(roomId);
+          if (meeting) {
+            await meetingCleanupService.constructor.updateMeetingActivity(meeting._id);
+            
+            // If this is the first user and meeting is scheduled, set it to active
+            if (isFirstUser && meeting.status === 'scheduled') {
+              await Meeting.updateStatus(meeting._id, 'active');
+              console.log(`Meeting ${roomId} is now active - first participant joined`);
+            }
+          }
+        } catch (err) {
+          console.error('Error updating meeting activity:', err);
+        }
 
         // Notify others in the room
         socket.to(roomId).emit(SOCKET_EVENTS.USER_JOINED, {
@@ -123,18 +143,32 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
     require('./modelSocketHandlers')(socket, io, roomModels);
 
     // Disconnect handler
-    socket.on(SOCKET_EVENTS.DISCONNECT, () => {
+    socket.on(SOCKET_EVENTS.DISCONNECT, async () => {
       try {
         if (socket.roomId) {
           const room = rooms.get(socket.roomId);
           if (room) {
             room.delete(socket.id);
+            
+            // If room is now empty, end the meeting
             if (room.size === 0) {
               rooms.delete(socket.roomId);
+              
               // Clean up room model when room is empty
               const model = roomModels.get(socket.roomId);
               if (model) {
                 roomModels.delete(socket.roomId);
+              }
+              
+              // Update meeting status to ended
+              try {
+                const meeting = await Meeting.findByMeetingCode(socket.roomId);
+                if (meeting && meeting.status !== 'ended') {
+                  await Meeting.updateStatus(meeting._id, 'ended');
+                  console.log(`Meeting ${socket.roomId} ended - all participants left`);
+                }
+              } catch (err) {
+                console.error('Error ending meeting:', err);
               }
               console.log(`Room ${socket.roomId} deleted (empty)`);
             }

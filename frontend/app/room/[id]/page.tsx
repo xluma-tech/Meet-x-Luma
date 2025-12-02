@@ -93,8 +93,10 @@ const getDeviceInfo = () => {
 export default function RoomPage() {
   const resolvedParams = useParams();
   const resolvedSearchParams = useSearchParams();
-  const userName = resolvedSearchParams.get('name') || 'Guest';
   const roomId = (Array.isArray(resolvedParams?.id) ? resolvedParams.id[0] : resolvedParams?.id) as string;
+  
+  // Get user name from URL parameter or default to 'Guest'
+  const userName = resolvedSearchParams.get('name') || 'Guest';
 
   const [peers, setPeers] = useState<Peer[]>([]);
   const [screenPeers, setScreenPeers] = useState<ScreenPeer[]>([]); // Separate peers for screen sharing
@@ -980,7 +982,21 @@ export default function RoomPage() {
   };
 
   const leaveRoom = () => {
-    window.location.href = `/event/${roomId}`;
+    // Disconnect socket
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+    
+    // Stop all media tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    // Redirect to homepage
+    window.location.href = '/';
   };
 
   const filteredMessages =
