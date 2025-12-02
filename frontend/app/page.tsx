@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import AuthStatus from '@/components/auth/AuthStatus';
 
 export default function Home() {
   const router = useRouter();
@@ -38,6 +39,7 @@ export default function Home() {
               </div>
               <span className="text-xl font-bold text-white">Luma Meet</span>
             </div>
+            <AuthStatus />
           </div>
         </nav>
 

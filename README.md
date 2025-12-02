@@ -1,215 +1,270 @@
-# Meet-x-Luma
+# Luma Meet - Real-Time Video Conferencing Platform
 
-## 🚀 Major Architecture Update: P2P → Production SFU
+## 📚 Documentation
 
-**A complete production-grade SFU architecture has been designed and delivered!**
+This repository contains comprehensive documentation for the Luma Meet platform:
 
-### What's New?
-This repository now includes a **complete blueprint** for migrating from P2P mesh to a globally distributed SFU-based platform capable of supporting **10,000+ concurrent users**.
+### 1. [Technical Documentation](./TECHNICAL_DOCUMENTATION.md)
+Complete technical reference covering:
+- System architecture and components
+- Technology stack details
+- API reference and endpoints
+- Implementation details
+- Deployment instructions
+- Performance optimizations
+- Troubleshooting guides
 
-📁 **All architecture files are in**: [`infrastructure/`](./infrastructure/)
+### 2. [High-Level Design (HLD)](./HIGH_LEVEL_DESIGN.md)
+Architectural overview including:
+- System architecture diagrams
+- Component design
+- Data flow diagrams
+- Technology decisions and rationale
+- Scalability strategy
+- Security architecture
+- Future roadmap
 
-### Quick Links
-- 🎯 **[Start Here: Migration Summary](./MIGRATION_SUMMARY.md)** - What's been delivered
-- ⚡ **[Quick Start Guide](./infrastructure/QUICK_START.md)** - Deploy in 15 minutes
-- 📚 **[Complete Index](./infrastructure/INDEX.md)** - Navigate all documentation
-- 🏗️ **[Detailed Architecture](./infrastructure/docs/architecture-detailed.md)** - 50+ page technical design
-- 📋 **[Implementation Guide](./infrastructure/IMPLEMENTATION_GUIDE.md)** - 8-week rollout plan
-- 💰 **[Cost Model](./infrastructure/docs/cost-model.csv)** - Detailed breakdown
-
-### What's Included?
-- ✅ Complete architecture documentation (100+ pages)
-- ✅ Infrastructure as Code (Terraform + Kubernetes)
-- ✅ Automated deployment scripts
-- ✅ Load testing framework
-- ✅ Cost model ($38K/month for 10K users)
-- ✅ Operational runbooks
-- ✅ 8-week implementation plan
-
-### Key Metrics
-- **Capacity**: 10,000 concurrent users (scales to 100K+)
-- **Cost**: $3.80/user/month (87% cheaper than Twilio)
-- **Latency**: <200ms within region
-- **Availability**: 99.9% SLA
-- **ROI**: $2.7M annual savings vs managed services
-
-### Architecture Comparison
-
-#### Current (P2P Mesh)
-```
-Client A ←→ Client B ←→ Client C
-   ↓  ×  ↓  ×  ↓
-Doesn't scale beyond 6-10 users
-```
-
-#### New (SFU)
-```
-Clients → SFU Server → Clients
-Scales to 100+ users per SFU
-Global distribution across 5 regions
-```
-
-### Quick Start
-```bash
-# Deploy dev environment (10 minutes)
-cd infrastructure
-./scripts/deploy.sh dev us-east-1
-
-# Run load test
-cd load-tests
-./run-full-test.sh
-```
-
-### Implementation Timeline
-- **Week 1-2**: Infrastructure setup
-- **Week 3-4**: Media plane (SFU, TURN)
-- **Week 5-6**: Client migration
-- **Week 7-8**: Production rollout
-
-### Cost Breakdown
-| Component | Monthly Cost |
-|-----------|--------------|
-| Compute | $9,060 |
-| Data Transfer | $45,000 |
-| Storage | $250 |
-| Database | $395 |
-| Other | $1,705 |
-| **Total** | **$56,410** |
-| **Optimized** | **$37,960** |
-
-**Per User**: $3.80/month
-
----
-
-# Original P2P Version
-
-## Overview
-Beautiful video meetings powered by WebRTC. No downloads, no API keys, just pure peer-to-peer connections.
-
-## Features
-- 🎥 HD Video & Audio
-- 🖥️ Screen Sharing
-- 💬 Real-time Chat
-- 👥 10+ Participants
-- 🔒 Secure P2P Connections
-- 📱 Mobile Ready
-
-## Tech Stack
-- **Frontend**: Next.js 14, React, TypeScript, TailwindCSS
-- **Backend**: Node.js, Express, Socket.IO
-- **WebRTC**: SimplePeer
-- **Deployment**: Vercel (Frontend), Render (Backend)
-
-## Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+
-- npm or yarn
+- npm 9+
 
-### Installation
-
-1. Clone the repository
+### Backend Setup
 ```bash
-git clone https://github.com/yourusername/Meet-x-Luma.git
-cd Meet-x-Luma
-```
-
-2. Install dependencies
-```bash
-# Backend
 cd backend
 npm install
-
-# Frontend
-cd ../frontend
-npm install
-```
-
-3. Configure environment variables
-```bash
-# Backend (.env)
-PORT=4000
-CORS_ORIGIN=http://localhost:3000
-
-# Frontend (.env.local)
-NEXT_PUBLIC_SOCKET_URL=http://localhost:4000
-```
-
-4. Run development servers
-```bash
-# Backend (Terminal 1)
-cd backend
+cp .env.example .env
 npm run dev
+```
 
-# Frontend (Terminal 2)
+### Frontend Setup
+```bash
 cd frontend
+npm install
+cp .env.example .env.local
 npm run dev
 ```
 
-5. Open http://localhost:3000
+## 🏗️ Project Structure
 
-## Project Structure
 ```
-Meet-x-Luma/
-├── frontend/           # Next.js frontend
-│   ├── app/           # App router pages
-│   ├── config/        # Configuration
-│   └── public/        # Static assets
-├── backend/           # Node.js backend
-│   ├── src/          # Source code
-│   └── data/         # Data storage
-└── infrastructure/    # 🆕 Production SFU architecture
-    ├── docs/         # Architecture documentation
-    ├── terraform/    # Infrastructure as Code
-    ├── kubernetes/   # Helm charts
-    ├── scripts/      # Automation scripts
-    └── load-tests/   # Load testing framework
+.
+├── backend/                 # Node.js backend server
+│   ├── src/
+│   │   └── server.js       # Main server file
+│   ├── data/               # JSON storage & models
+│   └── package.json
+│
+├── frontend/               # Next.js frontend application
+│   ├── app/
+│   │   ├── page.tsx       # Landing page
+│   │   ├── create/        # Event creation
+│   │   ├── event/[id]/    # Event details
+│   │   └── room/[id]/     # Video room
+│   └── package.json
+│
+├── infrastructure/         # Deployment & infrastructure
+│   ├── terraform/         # Infrastructure as code
+│   ├── kubernetes/        # K8s manifests
+│   └── docs/             # Infrastructure docs
+│
+├── TECHNICAL_DOCUMENTATION.md  # Complete technical reference
+├── HIGH_LEVEL_DESIGN.md       # Architecture & design
+└── README.md                  # This file
 ```
 
-## Deployment
+## ✨ Key Features
 
-### Current P2P Version
+- **Zero-Download Meetings**: Browser-based, no installation required
+- **WebRTC P2P**: Low-latency peer-to-peer video/audio
+- **Screen Sharing**: Share screen with system audio
+- **Real-Time Chat**: Public and private messaging
+- **3D Model Viewer**: Collaborative 3D model visualization
+- **Hand Gestures**: Control 3D models with hand gestures
+- **Picture-in-Picture**: Continue viewing when tab is minimized
+- **Active Speaker Detection**: Visual feedback for who's speaking
+- **Cross-Platform**: Desktop, mobile, and tablet support
+
+## 🛠️ Technology Stack
+
+### Frontend
+- **Framework**: Next.js 16 (React 19)
+- **Language**: TypeScript 5
+- **Styling**: Tailwind CSS 4
+- **WebRTC**: SimplePeer 9.11.1
+- **Real-time**: Socket.IO Client 4.8.1
+- **3D Rendering**: Three.js 0.181.2, React Three Fiber
+- **Hand Tracking**: MediaPipe Hands
+
+### Backend
+- **Runtime**: Node.js 18+
+- **Framework**: Express.js 4.18.2
+- **Real-time**: Socket.IO 4.6.1
+- **File Upload**: Multer 2.0.2
+- **Storage**: JSON files (upgradeable to PostgreSQL)
+
+## 📊 Architecture Overview
+
+```
+┌─────────────┐
+│   Browser   │ ← Users
+└──────┬──────┘
+       │
+┌──────▼──────┐
+│  Next.js    │ ← Frontend (Vercel)
+│  Frontend   │
+└──────┬──────┘
+       │
+       ├─── WebRTC P2P ───┐
+       │                  │
+┌──────▼──────┐    ┌──────▼──────┐
+│  Socket.IO  │    │    STUN     │
+│  Signaling  │    │   Servers   │
+└──────┬──────┘    └─────────────┘
+       │
+┌──────▼──────┐
+│   Node.js   │ ← Backend (Render)
+│   Backend   │
+└──────┬──────┘
+       │
+┌──────▼──────┐
+│   Storage   │ ← JSON Files + File System
+└─────────────┘
+```
+
+## 🔧 Configuration
+
+### Backend Environment Variables
+```bash
+PORT=4000
+HOST=0.0.0.0
+NODE_ENV=production
+CORS_ORIGIN=https://your-frontend.vercel.app
+```
+
+### Frontend Environment Variables
+```bash
+NEXT_PUBLIC_API_URL=https://your-backend.render.com
+NEXT_PUBLIC_SOCKET_URL=https://your-backend.render.com
+```
+
+## 📈 Performance
+
+- **Room Join Time**: <5 seconds
+- **Video Latency**: <200ms
+- **Concurrent Rooms**: 100+ (current), 1000+ (planned)
+- **Participants per Room**: 10+ (P2P), 100+ (with SFU)
+
+## 🔒 Security
+
+- WebRTC encryption (DTLS-SRTP)
+- HTTPS/WSS in production
+- CORS protection
+- File type validation
+- Input sanitization
+- No persistent user data
+
+## 🚢 Deployment
+
+### Current (MVP)
 - **Frontend**: Vercel
-- **Backend**: Render
-- **Cost**: ~$0-20/month
+- **Backend**: Render.com
+- **Storage**: Local filesystem
 
-### New SFU Version (Production)
-See [`infrastructure/`](./infrastructure/) for complete deployment guide.
+### Future (Production)
+- **Frontend**: CloudFlare CDN
+- **Backend**: Kubernetes (EKS/GKE)
+- **SFU**: LiveKit
+- **Database**: PostgreSQL
+- **Storage**: S3
+- **Monitoring**: Prometheus + Grafana
 
-## Migration Path
+## 📝 API Endpoints
 
-### Option 1: Keep P2P (Current)
-- ✅ Simple, low cost
-- ✅ Works for small meetings (<10 users)
-- ❌ Doesn't scale
-- ❌ No server-side control
+### Events
+- `GET /api/events` - List all events
+- `GET /api/events/:id` - Get event details
+- `POST /api/events` - Create event
+- `PUT /api/events/:id` - Update event
+- `DELETE /api/events/:id` - Delete event
 
-### Option 2: Migrate to SFU (Recommended)
-- ✅ Scales to 10,000+ users
-- ✅ Server-side quality control
-- ✅ Recording capabilities
-- ✅ 87% cheaper than managed services
-- ⚠️ Requires 8 weeks implementation
-- ⚠️ Higher operational complexity
+### Rooms
+- `GET /api/rooms/:roomId` - Get room status
 
-**Decision Guide**: See [MIGRATION_SUMMARY.md](./MIGRATION_SUMMARY.md)
+### 3D Models
+- `POST /api/models/upload` - Upload model
+- `GET /api/models/:modelId` - Download model
+- `GET /api/rooms/:roomId/model` - Get room model
 
-## Contributing
-Contributions are welcome! Please read our contributing guidelines.
+### Health
+- `GET /health` - Server health check
 
-## License
-MIT License - see LICENSE file for details
+## 🧪 Testing
 
-## Support
-- **Documentation**: [infrastructure/INDEX.md](./infrastructure/INDEX.md)
+```bash
+# Backend tests
+cd backend
+npm test
+
+# Frontend tests
+cd frontend
+npm test
+
+# E2E tests
+npm run test:e2e
+
+# Load tests
+npm run test:load
+```
+
+## 📖 Documentation Links
+
+- [Technical Documentation](./TECHNICAL_DOCUMENTATION.md) - Complete technical reference
+- [High-Level Design](./HIGH_LEVEL_DESIGN.md) - Architecture and design decisions
+- [Infrastructure Guide](./infrastructure/README.md) - Deployment and scaling
+
+## 🗺️ Roadmap
+
+### Phase 1: Current (MVP)
+- ✅ WebRTC P2P video/audio
+- ✅ Screen sharing
+- ✅ Real-time chat
+- ✅ 3D model viewer
+- ✅ Hand gesture control
+
+### Phase 2: Q1-Q2 2026
+- [ ] Recording and playback
+- [ ] Virtual backgrounds
+- [ ] Migrate to LiveKit SFU
+- [ ] Multi-region deployment
+- [ ] PostgreSQL database
+
+### Phase 3: Q3-Q4 2026
+- [ ] User authentication
+- [ ] Room passwords
+- [ ] Admin dashboard
+- [ ] Real-time transcription
+- [ ] Mobile apps
+
+## 🤝 Contributing
+
+1. Read the [Technical Documentation](./TECHNICAL_DOCUMENTATION.md)
+2. Review the [High-Level Design](./HIGH_LEVEL_DESIGN.md)
+3. Fork the repository
+4. Create a feature branch
+5. Submit a pull request
+
+## 📄 License
+
+MIT License - See LICENSE file for details
+
+## 📧 Support
+
+- **Documentation**: See TECHNICAL_DOCUMENTATION.md
 - **Issues**: GitHub Issues
-- **Discussions**: GitHub Discussions
-
-## Acknowledgments
-- LiveKit for SFU architecture inspiration
-- SimplePeer for WebRTC abstraction
-- Next.js team for amazing framework
+- **Email**: support@lumameet.com
 
 ---
 
-**Ready to scale?** → Start with [MIGRATION_SUMMARY.md](./MIGRATION_SUMMARY.md)
+**Built with ❤️ using Next.js, WebRTC, and Three.js**
