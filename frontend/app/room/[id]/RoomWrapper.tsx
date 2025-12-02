@@ -6,6 +6,7 @@ import { meetingService } from '@/lib/meetingService';
 import { useUser } from '@/lib/useUser';
 import JoinRequestDialog from '@/components/meeting/JoinRequestDialog';
 import JoinRequestPending from '@/components/meeting/JoinRequestPending';
+import JoinMeetingScreen from '@/components/meeting/JoinMeetingScreen';
 
 export default function RoomWrapper({ children }: { children: React.ReactNode }) {
   const params = useParams();
@@ -16,6 +17,8 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
   const [showJoinRequest, setShowJoinRequest] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
   const [meeting, setMeeting] = useState<any>(null);
+  const [showJoinScreen, setShowJoinScreen] = useState(false);
+  const [userName, setUserName] = useState<string | null>(null);
 
   useEffect(() => {
     validateMeeting();
@@ -59,16 +62,30 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
         }
       }
 
-      // Update meeting status to active if it's scheduled
-      if (fetchedMeeting.status === 'scheduled') {
-        await meetingService.updateMeetingStatus(fetchedMeeting._id, 'active');
-      }
-
+      // Show join screen to get user name
+      setShowJoinScreen(true);
       setIsValidating(false);
     } catch (err) {
       console.error('Error validating meeting:', err);
       router.push('/room/not-found');
     }
+  };
+
+  const handleJoinMeeting = async (name: string) => {
+    setUserName(name);
+    
+    // Update meeting status to active if it's scheduled
+    if (meeting && meeting.status === 'scheduled') {
+      await meetingService.updateMeetingStatus(meeting._id, 'active');
+    }
+    
+    setShowJoinScreen(false);
+  };
+
+  const handleSignIn = () => {
+    // Redirect to sign in page with return URL
+    const returnUrl = encodeURIComponent(`/room/${params.id}`);
+    router.push(`/api/auth/login?returnTo=${returnUrl}`);
   };
 
   const handleRequestSent = () => {
@@ -116,6 +133,19 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     );
   }
 
+  if (showJoinScreen && meeting) {
+    return (
+      <JoinMeetingScreen
+        meetingCode={meeting.meetingCode}
+        meetingTitle={meeting.title}
+        isAuthenticated={!!user}
+        userName={user?.name}
+        onJoin={handleJoinMeeting}
+        onSignIn={handleSignIn}
+      />
+    );
+  }
+
   if (isValidating) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-slate-900 flex items-center justify-center">
@@ -125,6 +155,15 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
         </div>
       </div>
     );
+  }
+
+  // Pass userName to children via URL parameter
+  if (userName) {
+    const currentUrl = new URL(window.location.href);
+    if (!currentUrl.searchParams.has('name')) {
+      currentUrl.searchParams.set('name', userName);
+      window.history.replaceState({}, '', currentUrl.toString());
+    }
   }
 
   return <>{children}</>;

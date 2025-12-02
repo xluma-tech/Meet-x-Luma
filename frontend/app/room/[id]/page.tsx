@@ -10,6 +10,8 @@ import { FloatingWindow } from './components/FloatingWindow';
 import { ModelViewer } from './components/ModelViewer';
 import { HandGestureControl } from './components/HandGestureControl';
 import { ModelUploadPanel } from './components/ModelUploadPanel';
+import MeetingLinkCard from '@/components/meeting/MeetingLinkCard';
+import { meetingService } from '@/lib/meetingService';
 import dynamic from 'next/dynamic';
 
 // Development logging utility
@@ -111,6 +113,8 @@ export default function RoomPage() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<ReturnType<typeof getDeviceInfo> | null>(null);
+  const [showMeetingLink, setShowMeetingLink] = useState(false);
+  const [meetingTitle, setMeetingTitle] = useState<string>('');
   const [pipEnabled, setPipEnabled] = useState(true);
   const [showFloatingWindow, setShowFloatingWindow] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState<string | null>(null);
@@ -209,6 +213,20 @@ export default function RoomPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showUserDropdown]);
+
+  // Close meeting link modal with Escape key
+  useEffect(() => {
+    if (!showMeetingLink) return;
+
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowMeetingLink(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [showMeetingLink]);
 
   // Audio level detection for active speaker
   const setupAudioAnalyser = useCallback((stream: MediaStream, userId: string) => {
@@ -455,6 +473,15 @@ export default function RoomPage() {
   };
 
   useEffect(() => {
+    // Fetch meeting title
+    const fetchMeetingTitle = async () => {
+      const meeting = await meetingService.getMeeting(roomId);
+      if (meeting) {
+        setMeetingTitle(meeting.title);
+      }
+    };
+    fetchMeetingTitle();
+
     // Detect device and browser info
     const info = getDeviceInfo();
     setDeviceInfo(info);
@@ -1372,6 +1399,39 @@ export default function RoomPage() {
         onClose={() => setShowFloatingWindow(false)}
       />
 
+      {/* Meeting Link Modal */}
+      {showMeetingLink && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowMeetingLink(false);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setShowMeetingLink(false);
+            }
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="meeting-link-title"
+        >
+          <div className="relative">
+            <button
+              onClick={() => setShowMeetingLink(false)}
+              className="absolute -top-2 -right-2 bg-red-600 hover:bg-red-700 text-white rounded-full p-2 shadow-lg z-10"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <MeetingLinkCard meetingCode={roomId} meetingTitle={meetingTitle} />
+          </div>
+        </div>
+      )}
+
       <div className="h-screen bg-gray-900 text-white flex flex-col">
         <div className="bg-gray-800 px-3 md:px-4 py-2 md:py-3 flex items-center justify-between border-b border-gray-700 flex-shrink-0">
         <div className="flex-1">
@@ -1400,6 +1460,27 @@ export default function RoomPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowMeetingLink(true)}
+            className="p-2 rounded-lg bg-green-600 hover:bg-green-700 transition-colors flex items-center justify-center touch-manipulation"
+            title="Meeting Info & Link"
+            aria-label="Show meeting link"
+          >
+            <svg
+              className="w-5 h-5 md:w-6 md:h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </button>
           <button
             onClick={() => setLowPowerMode(!lowPowerMode)}
             className={`p-2 rounded-lg ${
