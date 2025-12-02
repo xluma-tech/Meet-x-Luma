@@ -19,6 +19,7 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
   const [meeting, setMeeting] = useState<any>(null);
   const [showJoinScreen, setShowJoinScreen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [hasJoinedProperly, setHasJoinedProperly] = useState(false);
 
   useEffect(() => {
     validateMeeting();
@@ -26,6 +27,7 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
 
   const validateMeeting = async () => {
     const meetingCode = params.id as string;
+    console.log('🔍 RoomWrapper: Validating meeting:', meetingCode);
 
     if (!meetingCode) {
       router.push('/room/not-found');
@@ -37,10 +39,12 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
       const fetchedMeeting = await meetingService.getMeeting(meetingCode);
 
       if (!fetchedMeeting) {
+        console.log('❌ RoomWrapper: Meeting not found');
         router.push('/room/not-found');
         return;
       }
 
+      console.log('✅ RoomWrapper: Meeting found:', fetchedMeeting.title);
       setMeeting(fetchedMeeting);
 
       // Check if meeting has ended
@@ -55,6 +59,7 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
         const canJoin = meetingService.canJoinMeeting(fetchedMeeting, user?.email, user?.sub);
 
         if (!canJoin) {
+          console.log('🔒 RoomWrapper: Private meeting - showing join request');
           // Show join request dialog
           setShowJoinRequest(true);
           setIsValidating(false);
@@ -63,6 +68,7 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
       }
 
       // Show join screen to get user name
+      console.log('👋 RoomWrapper: Showing join screen');
       setShowJoinScreen(true);
       setIsValidating(false);
     } catch (err) {
@@ -72,7 +78,9 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
   };
 
   const handleJoinMeeting = async (name: string) => {
+    console.log('🎉 RoomWrapper: User joining as:', name);
     setUserName(name);
+    setHasJoinedProperly(true);
     
     // Update meeting status to active if it's scheduled
     if (meeting && meeting.status === 'scheduled') {
@@ -80,6 +88,7 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     }
     
     setShowJoinScreen(false);
+    console.log('✅ RoomWrapper: Join screen closed, rendering meeting room');
   };
 
   const handleSignIn = () => {
@@ -157,13 +166,23 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     );
   }
 
+  // Only render the meeting room if user has properly joined through the join screen
+  if (!userName || !hasJoinedProperly) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-white text-lg">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Pass userName to children via URL parameter
-  if (userName) {
-    const currentUrl = new URL(window.location.href);
-    if (!currentUrl.searchParams.has('name')) {
-      currentUrl.searchParams.set('name', userName);
-      window.history.replaceState({}, '', currentUrl.toString());
-    }
+  const currentUrl = new URL(window.location.href);
+  if (!currentUrl.searchParams.has('name')) {
+    currentUrl.searchParams.set('name', userName);
+    window.history.replaceState({}, '', currentUrl.toString());
   }
 
   return <>{children}</>;
