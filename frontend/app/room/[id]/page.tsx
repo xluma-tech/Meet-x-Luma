@@ -154,6 +154,8 @@ export default function RoomPage() {
   const screenStreamRef = useRef<MediaStream | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const hasJoinedRoom = useRef(false); // Track if we've already joined
+  const signalQueueRef = useRef<Map<string, any[]>>(new Map()); // Queue signals per peer
+  const messageCounterRef = useRef(0); // Counter for unique message IDs
 
   // Picture-in-Picture hook
   const { isPiPActive, isPageHidden } = usePictureInPicture({
@@ -240,32 +242,33 @@ export default function RoomPage() {
   }, [isPageHidden, pipEnabled, isPiPActive, showFloatingWindow]);
 
   // Fetch meeting data and check if user is host
-  useEffect(() => {
-    const fetchMeetingData = async () => {
-      try {
-        const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:4000';
-        const response = await fetch(`${BACKEND_URL}/api/meetings/${roomId}`);
-        if (response.ok) {
-          const data = await response.json();
-          const meeting = data.data || data;
-          setMeetingData(meeting);
+  // COMMENTED OUT - Duplicate of the useEffect above (line 176)
+  // useEffect(() => {
+  //   const fetchMeetingData = async () => {
+  //     try {
+  //       const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:4000';
+  //       const response = await fetch(`${BACKEND_URL}/api/meetings/${roomId}`);
+  //       if (response.ok) {
+  //         const data = await response.json();
+  //         const meeting = data.data || data;
+  //         setMeetingData(meeting);
 
-          // Check if current user is host
-          const userResponse = await fetch('/api/auth/me');
-          if (userResponse.ok) {
-            const { user: currentUser } = await userResponse.json();
-            if (currentUser && meeting.hostAuth0Id === currentUser.sub) {
-              setIsHost(true);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching meeting data:', error);
-      }
-    };
+  //         // Check if current user is host
+  //         const userResponse = await fetch('/api/auth/me');
+  //         if (userResponse.ok) {
+  //           const { user: currentUser } = await userResponse.json();
+  //           if (currentUser && meeting.hostAuth0Id === currentUser.sub) {
+  //             setIsHost(true);
+  //           }
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error('Error fetching meeting data:', error);
+  //     }
+  //   };
 
-    fetchMeetingData();
-  }, [roomId]);
+  //   fetchMeetingData();
+  // }, [roomId]);
 
   // Close user dropdown when clicking outside
   useEffect(() => {
@@ -371,6 +374,7 @@ export default function RoomPage() {
 
   // Peer creation functions - declared before useEffect to avoid hoisting issues
   const createPeer = (userToSignal: string, stream: MediaStream) => {
+    console.log(`Creating peer connection to ${userToSignal} as initiator`);
     const peer = new SimplePeer({
       initiator: true,
       trickle: true,
@@ -387,37 +391,54 @@ export default function RoomPage() {
     });
 
     peer.on('signal', (signal) => {
+      console.log(`📤 Sending signal to ${userToSignal}:`, signal.type);
       socketRef.current?.emit('signal', { to: userToSignal, signal });
     });
 
     peer.on('stream', (remoteStream) => {
-      devLog(`Received camera stream from ${userToSignal}:`, remoteStream.id);
+      console.log(`🎥 Received camera stream from ${userToSignal}:`, remoteStream.id);
+      console.log(`Stream tracks:`, {
+        video: remoteStream.getVideoTracks().length,
+        audio: remoteStream.getAudioTracks().length
+      });
+      
       const peerIndex = peersRef.current.findIndex((p) => p.userId === userToSignal);
       if (peerIndex !== -1) {
         peersRef.current[peerIndex].stream = remoteStream;
         setPeers([...peersRef.current]);
-        devLog(`Camera stream set for peer ${userToSignal}`);
+        console.log(`✅ Camera stream set for peer ${userToSignal}`);
         
         // Setup audio analyser for speaker detection
         setupAudioAnalyser(remoteStream, userToSignal);
+      } else {
+        console.warn(`Peer ${userToSignal} not found in peersRef when setting stream`);
       }
     });
 
     peer.on('error', (err: Error) => {
-      if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
-        return;
+      if (err.message?.includes('User-Initiated Abort') || 
+          err.message?.includes('Close called') ||
+          err.message?.includes('stable') ||
+          err.message?.includes('createAnswer') ||
+          err.message?.includes('createOffer')) {
+        return; // Ignore expected WebRTC state errors
       }
-      trackError(err, 'Camera Peer Connection');
+      console.error(`❌ Peer error with ${userToSignal}:`, err.message);
     });
 
     peer.on('close', () => {
-      // Peer connection closed
+      console.log(`🔌 Peer connection closed with ${userToSignal}`);
+    });
+
+    peer.on('connect', () => {
+      console.log(`🔗 Peer connected to ${userToSignal}`);
     });
 
     return peer;
   };
 
-  const addPeer = (incomingSignal: string, stream: MediaStream) => {
+  const addPeer = (userId: string, stream: MediaStream) => {
+    console.log(`Creating peer connection from ${userId} as receiver`);
     const peer = new SimplePeer({
       initiator: false,
       trickle: true,
@@ -434,31 +455,47 @@ export default function RoomPage() {
     });
 
     peer.on('signal', (signal) => {
-      socketRef.current?.emit('signal', { to: incomingSignal, signal });
+      console.log(`📤 Sending signal to ${userId}:`, signal.type);
+      socketRef.current?.emit('signal', { to: userId, signal });
     });
 
     peer.on('stream', (remoteStream) => {
-      console.log(`Received camera stream from ${incomingSignal}:`, remoteStream.id);
-      const peerIndex = peersRef.current.findIndex((p) => p.userId === incomingSignal);
+      console.log(`🎥 Received camera stream from ${userId}:`, remoteStream.id);
+      console.log(`Stream tracks:`, {
+        video: remoteStream.getVideoTracks().length,
+        audio: remoteStream.getAudioTracks().length
+      });
+      
+      const peerIndex = peersRef.current.findIndex((p) => p.userId === userId);
       if (peerIndex !== -1) {
         peersRef.current[peerIndex].stream = remoteStream;
         setPeers([...peersRef.current]);
-        console.log(`Camera stream set for peer ${incomingSignal}`);
+        console.log(`✅ Camera stream set for peer ${userId}`);
         
         // Setup audio analyser for speaker detection
-        setupAudioAnalyser(remoteStream, incomingSignal);
+        setupAudioAnalyser(remoteStream, userId);
+      } else {
+        console.warn(`Peer ${userId} not found in peersRef when setting stream`);
       }
     });
 
     peer.on('error', (err: Error) => {
-      if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
-        return;
+      if (err.message?.includes('User-Initiated Abort') || 
+          err.message?.includes('Close called') ||
+          err.message?.includes('stable') ||
+          err.message?.includes('createAnswer') ||
+          err.message?.includes('createOffer')) {
+        return; // Ignore expected WebRTC state errors
       }
-      console.error('Peer error:', err);
+      console.error(`❌ Peer error with ${userId}:`, err.message);
     });
 
     peer.on('close', () => {
-      // Peer connection closed
+      console.log(`🔌 Peer connection closed with ${userId}`);
+    });
+
+    peer.on('connect', () => {
+      console.log(`🔗 Peer connected to ${userId}`);
     });
 
     return peer;
@@ -670,6 +707,7 @@ export default function RoomPage() {
         socketRef.current?.emit('join-room', { roomId, userName });
 
         socketRef.current?.on('existing-users', (users: Array<{ userId: string; userName: string }>) => {
+          console.log(`📋 Found ${users.length} existing users`);
           const newPeers: Peer[] = [];
           users.forEach((user) => {
             const peer = createPeer(user.userId, stream);
@@ -681,9 +719,31 @@ export default function RoomPage() {
           });
           peersRef.current = newPeers;
           setPeers(newPeers);
+          
+          // Process queued signals after all peers are created and stored
+          setTimeout(() => {
+            users.forEach((user) => {
+              if (signalQueueRef.current.has(user.userId)) {
+                const queuedSignals = signalQueueRef.current.get(user.userId)!;
+                const peerObj = peersRef.current.find(p => p.userId === user.userId);
+                if (peerObj) {
+                  console.log(`Processing ${queuedSignals.length} queued signals for ${user.userId}`);
+                  queuedSignals.forEach(signal => {
+                    try {
+                      peerObj.peer.signal(signal);
+                    } catch (err) {
+                      console.warn(`Error processing queued signal for ${user.userId}:`, err);
+                    }
+                  });
+                }
+                signalQueueRef.current.delete(user.userId);
+              }
+            });
+          }, 100);
         });
 
         socketRef.current?.on('user-joined', ({ userId, userName: newUserName }) => {
+          console.log(`👤 User ${newUserName} joined`);
           // Check if peer already exists to prevent duplicates
           const existingPeer = peersRef.current.find(p => p.userId === userId);
           if (existingPeer) {
@@ -699,60 +759,73 @@ export default function RoomPage() {
           };
           peersRef.current = [...peersRef.current, newPeer];
           setPeers([...peersRef.current]);
+          
+          // Process queued signals after peer is created and stored
+          setTimeout(() => {
+            if (signalQueueRef.current.has(userId)) {
+              const queuedSignals = signalQueueRef.current.get(userId)!;
+              console.log(`Processing ${queuedSignals.length} queued signals for ${userId}`);
+              queuedSignals.forEach(signal => {
+                try {
+                  peer.signal(signal);
+                } catch (err) {
+                  console.warn(`Error processing queued signal for ${userId}:`, err);
+                }
+              });
+              signalQueueRef.current.delete(userId);
+            }
+          }, 100);
         });
 
         socketRef.current?.on('signal', ({ from, signal }) => {
+          console.log(`📨 Signal from ${from}: ${signal.type}`);
           const item = peersRef.current.find((p) => p.userId === from);
-          if (item && item.peer) {
-            try {
-              // Check if peer is not destroyed before signaling
-              const peerInternal = item.peer as SimplePeer.Instance & { 
-                destroyed?: boolean; 
-                _destroying?: boolean;
-                _pc?: RTCPeerConnection;
-              };
-              
-              if (peerInternal.destroyed || peerInternal._destroying) {
-                console.log(`Ignoring signal for destroyed peer ${from}`);
-                return;
-              }
+          
+          if (!item || !item.peer) {
+            console.log(`⏳ Queueing signal from ${from} (peer not ready)`);
+            // Queue the signal for when peer is created
+            if (!signalQueueRef.current.has(from)) {
+              signalQueueRef.current.set(from, []);
+            }
+            signalQueueRef.current.get(from)!.push(signal);
+            return;
+          }
+          
+          const peerInternal = item.peer as SimplePeer.Instance & { 
+            destroyed?: boolean; 
+            _destroying?: boolean;
+          };
+          
+          if (peerInternal.destroyed || peerInternal._destroying) {
+            console.log(`❌ Peer ${from} is destroyed, ignoring signal`);
+            return;
+          }
 
-              // Check RTCPeerConnection signaling state
-              if (peerInternal._pc) {
-                const signalingState = peerInternal._pc.signalingState;
-                console.log(`Peer ${from} signaling state:`, signalingState, 'Signal type:', signal.type);
-                
-                // If we're stable and receiving an answer, something is wrong - skip it
-                if (signalingState === 'stable' && signal.type === 'answer') {
-                  console.warn(`Ignoring answer signal for peer ${from} - already in stable state`);
-                  return;
-                }
-                
-                // If we're have-local-offer and receiving an offer, skip it
-                if (signalingState === 'have-local-offer' && signal.type === 'offer') {
-                  console.warn(`Ignoring offer signal for peer ${from} - already sent offer`);
-                  return;
-                }
-              }
-              
-              item.peer.signal(signal);
-            } catch (err) {
-              const error = err as Error;
-              // Log specific errors for debugging
-              if (error.message?.includes('setRemoteDescription') || error.message?.includes('stable')) {
-                console.warn(`WebRTC signaling error for peer ${from}:`, error.message);
-              } else if (!error.message?.includes('cannot signal after peer is destroyed') &&
-                         !error.message?.includes('User-Initiated Abort') &&
-                         !error.message?.includes('Close called')) {
-                console.error('Error signaling peer:', error);
-              }
+          // Process the signal with proper error handling
+          try {
+            item.peer.signal(signal);
+            console.log(`✅ Signal processed from ${from}`);
+          } catch (err) {
+            const error = err as Error;
+            // Log important errors but don't crash
+            if (error.message?.includes('cannot signal after peer is destroyed')) {
+              console.warn(`Peer ${from} was destroyed during signaling`);
+            } else if (error.message?.includes('stable') || 
+                       error.message?.includes('setLocalDescription') ||
+                       error.message?.includes('setRemoteDescription')) {
+              // These are expected WebRTC state errors - log but continue
+              console.warn(`WebRTC state error for ${from}: ${error.message.substring(0, 100)}`);
+            } else {
+              console.error(`Unexpected signaling error for ${from}:`, error.message);
             }
           }
         });
 
         socketRef.current?.on('user-left', ({ userId }) => {
+          console.log(`👋 User ${userId} left`);
           const peerObj = peersRef.current.find((p) => p.userId === userId);
           if (peerObj) {
+            console.log(`🗑️ Destroying peer for ${userId}`);
             peerObj.peer.destroy();
           }
           peersRef.current = peersRef.current.filter((p) => p.userId !== userId);
@@ -786,17 +859,26 @@ export default function RoomPage() {
         });
 
         socketRef.current?.on('chat-message', ({ userId, userName: senderName, message, timestamp }) => {
+          messageCounterRef.current += 1;
           setMessages((prev) => [
             ...prev,
-            { id: `${userId}-${timestamp}`, userName: senderName, userId, message, timestamp, isPrivate: false },
+            { 
+              id: `${userId}-${timestamp}-${messageCounterRef.current}`, 
+              userName: senderName, 
+              userId, 
+              message, 
+              timestamp, 
+              isPrivate: false 
+            },
           ]);
         });
 
         socketRef.current?.on('private-message', ({ userId, userName: senderName, message, timestamp }) => {
+          messageCounterRef.current += 1;
           setMessages((prev) => [
             ...prev,
             {
-              id: `${userId}-${timestamp}`,
+              id: `${userId}-${timestamp}-${messageCounterRef.current}`,
               userName: senderName,
               userId,
               message,

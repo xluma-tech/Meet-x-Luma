@@ -25,6 +25,31 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     validateMeeting();
   }, [params.id, user]); // Re-run when user loads
 
+  // Handle error redirect in useEffect to avoid setState during render
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        if (error === 'Meeting not found' || error === 'Invalid meeting code' || error === 'Failed to load meeting') {
+          router.push('/room/not-found');
+        } else {
+          router.push('/');
+        }
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [error, router]);
+
+  // Pass userName to children via URL parameter in useEffect
+  useEffect(() => {
+    if (userName && typeof window !== 'undefined') {
+      const currentUrl = new URL(window.location.href);
+      if (!currentUrl.searchParams.has('name')) {
+        currentUrl.searchParams.set('name', userName);
+        window.history.replaceState({}, '', currentUrl.toString());
+      }
+    }
+  }, [userName]);
+
   const validateMeeting = async () => {
     const meetingCode = params.id as string;
     console.log('🔍 RoomWrapper: Validating meeting:', meetingCode);
@@ -162,20 +187,6 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     router.push('/');
   };
 
-  // Handle error redirect in useEffect to avoid setState during render
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => {
-        if (error === 'Meeting not found' || error === 'Invalid meeting code' || error === 'Failed to load meeting') {
-          router.push('/room/not-found');
-        } else {
-          router.push('/');
-        }
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, router]);
-
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-slate-900 flex items-center justify-center">
@@ -247,13 +258,6 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
         </div>
       </div>
     );
-  }
-
-  // Pass userName to children via URL parameter
-  const currentUrl = new URL(window.location.href);
-  if (!currentUrl.searchParams.has('name')) {
-    currentUrl.searchParams.set('name', userName);
-    window.history.replaceState({}, '', currentUrl.toString());
   }
 
   return <>{children}</>;
