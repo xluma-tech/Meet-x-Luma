@@ -1,8 +1,8 @@
-const JoinRequest = require('../models/JoinRequest');
 const Meeting = require('../models/Meeting');
 const User = require('../models/User');
 const { sendSuccess, sendError } = require('../utils/responseHelper');
 const { sendJoinRequestNotification } = require('../services/emailService');
+const joinRequestService = require('../services/joinRequestService');
 
 /**
  * Create a join request for a private meeting
@@ -36,7 +36,7 @@ const createJoinRequest = async (req, res) => {
     }
 
     // Check for duplicate pending request
-    const duplicate = await JoinRequest.checkDuplicate(meeting._id.toString(), auth0Id, email);
+    const duplicate = await joinRequestService.checkDuplicateRequest(meetingCode, auth0Id, email);
     if (duplicate) {
       return sendError(res, 'You already have a pending join request', 400);
     }
@@ -60,8 +60,8 @@ const createJoinRequest = async (req, res) => {
       }
     }
 
-    // Create join request
-    const joinRequest = await JoinRequest.create({
+    // Create join request in Redis
+    const joinRequest = await joinRequestService.createJoinRequest({
       meetingId: meeting._id.toString(),
       meetingCode: meeting.meetingCode,
       ...requesterData,
@@ -103,6 +103,19 @@ const createJoinRequest = async (req, res) => {
       }
     }
 
+    // Emit socket event to notify host/cohosts in real-time
+    const io = req.app.locals.io;
+    if (io) {
+      io.to(meeting.meetingCode).emit('join-request-received', {
+        requestId: joinRequest._id,
+        requesterName: requesterData.requesterName,
+        requesterEmail: requesterData.requesterEmail,
+        requesterPicture: requesterData.requesterPicture,
+        createdAt: joinRequest.createdAt,
+      });
+      console.log(`Emitted join-request-received to room ${meeting.meetingCode}`);
+    }
+
     return sendSuccess(res, {
       message: 'Join request sent successfully',
       requestId: joinRequest._id,
@@ -125,7 +138,8 @@ const getJoinRequests = async (req, res) => {
       return sendError(res, 'Meeting not found', 404);
     }
 
-    const requests = await JoinRequest.findByMeetingId(meeting._id.toString());
+    // Get requests from Redis
+    const requests = await joinRequestService.getJoinRequestsByMeeting(meetingCode);
 
     return sendSuccess(res, requests);
   } catch (error) {
@@ -146,8 +160,8 @@ const acceptJoinRequest = async (req, res) => {
       return sendError(res, 'auth0Id is required', 400);
     }
 
-    // Get join request
-    const joinRequest = await JoinRequest.findById(requestId);
+    // Get join request from Redis
+    const joinRequest = await joinRequestService.getJoinRequest(requestId);
     if (!joinRequest) {
       return sendError(res, 'Join request not found', 404);
     }
@@ -157,7 +171,7 @@ const acceptJoinRequest = async (req, res) => {
     }
 
     // Get meeting
-    const meeting = await Meeting.findById(joinRequest.meetingId.toString());
+    const meeting = await Meeting.findByMeetingCode(joinRequest.meetingCode);
     if (!meeting) {
       return sendError(res, 'Meeting not found', 404);
     }
@@ -170,8 +184,8 @@ const acceptJoinRequest = async (req, res) => {
       return sendError(res, 'Only host or cohost can accept join requests', 403);
     }
 
-    // Update request status
-    await JoinRequest.updateStatus(requestId, 'accepted', auth0Id);
+    // Update request status in Redis
+    await joinRequestService.updateJoinRequestStatus(requestId, 'accepted', auth0Id);
 
     // Add participant to meeting
     const participant = {
@@ -191,6 +205,26 @@ const acceptJoinRequest = async (req, res) => {
     }
 
     await Meeting.addParticipant(meeting._id.toString(), participant);
+
+    // Emit socket event to notify the requester they've been accepted
+    const io = req.app.locals.io;
+    if (io) {
+      // Emit to the meeting room (for hosts to update their panel)
+      io.to(meeting.meetingCode).emit('join-request-accepted', {
+        requestId: joinRequest._id.toString(),
+        requesterAuth0Id: joinRequest.requesterAuth0Id,
+        requesterEmail: joinRequest.requesterEmail,
+      });
+      
+      // Also emit to the specific waiting room for this request
+      io.to(`waiting-${joinRequest._id.toString()}`).emit('join-request-accepted', {
+        requestId: joinRequest._id.toString(),
+        requesterAuth0Id: joinRequest.requesterAuth0Id,
+        requesterEmail: joinRequest.requesterEmail,
+      });
+      
+      console.log(`Emitted join-request-accepted for request ${requestId}`);
+    }
 
     return sendSuccess(res, {
       message: 'Join request accepted',
@@ -214,7 +248,8 @@ const rejectJoinRequest = async (req, res) => {
       return sendError(res, 'auth0Id is required', 400);
     }
 
-    const joinRequest = await JoinRequest.findById(requestId);
+    // Get join request from Redis
+    const joinRequest = await joinRequestService.getJoinRequest(requestId);
     if (!joinRequest) {
       return sendError(res, 'Join request not found', 404);
     }
@@ -223,7 +258,7 @@ const rejectJoinRequest = async (req, res) => {
       return sendError(res, 'This request has already been processed', 400);
     }
 
-    const meeting = await Meeting.findById(joinRequest.meetingId.toString());
+    const meeting = await Meeting.findByMeetingCode(joinRequest.meetingCode);
     if (!meeting) {
       return sendError(res, 'Meeting not found', 404);
     }
@@ -236,7 +271,28 @@ const rejectJoinRequest = async (req, res) => {
       return sendError(res, 'Only host or cohost can reject join requests', 403);
     }
 
-    await JoinRequest.updateStatus(requestId, 'rejected', auth0Id);
+    // Update request status in Redis
+    await joinRequestService.updateJoinRequestStatus(requestId, 'rejected', auth0Id);
+
+    // Emit socket event to notify the requester they've been rejected
+    const io = req.app.locals.io;
+    if (io) {
+      // Emit to the meeting room (for hosts to update their panel)
+      io.to(meeting.meetingCode).emit('join-request-rejected', {
+        requestId: joinRequest._id.toString(),
+        requesterAuth0Id: joinRequest.requesterAuth0Id,
+        requesterEmail: joinRequest.requesterEmail,
+      });
+      
+      // Also emit to the specific waiting room for this request
+      io.to(`waiting-${joinRequest._id.toString()}`).emit('join-request-rejected', {
+        requestId: joinRequest._id.toString(),
+        requesterAuth0Id: joinRequest.requesterAuth0Id,
+        requesterEmail: joinRequest.requesterEmail,
+      });
+      
+      console.log(`Emitted join-request-rejected for request ${requestId}`);
+    }
 
     return sendSuccess(res, {
       message: 'Join request rejected',

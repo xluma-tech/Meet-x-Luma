@@ -7,6 +7,7 @@ const config = require('./config/environment');
 const { createSocketServer } = require('./socket/socketConfig');
 const { initializeSocketHandlers } = require('./socket/socketHandlers');
 const { connectDatabase, closeDatabase } = require('./config/database');
+const { connectRedis, closeRedis } = require('./config/redis');
 const meetingCleanupService = require('./services/meetingCleanupService');
 
 // Initialize database connection
@@ -14,6 +15,9 @@ const startServer = async () => {
   try {
     // Connect to MongoDB
     await connectDatabase();
+
+    // Connect to Redis
+    connectRedis();
 
     // Create Express app
     const app = createApp();
@@ -65,6 +69,7 @@ process.on('SIGTERM', async () => {
   const server = await httpServer;
   server.close(async () => {
     await closeDatabase();
+    await closeRedis();
     console.log('Server closed');
     process.exit(0);
   });
@@ -76,6 +81,7 @@ process.on('SIGINT', async () => {
   const server = await httpServer;
   server.close(async () => {
     await closeDatabase();
+    await closeRedis();
     console.log('Server closed');
     process.exit(0);
   });

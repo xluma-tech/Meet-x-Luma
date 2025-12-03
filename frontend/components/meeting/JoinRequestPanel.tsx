@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { io, Socket } from 'socket.io-client';
 
 interface JoinRequest {
   _id: string;
@@ -25,6 +26,7 @@ export default function JoinRequestPanel({
   const [requests, setRequests] = useState<JoinRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:4000';
 
@@ -33,7 +35,11 @@ export default function JoinRequestPanel({
       const response = await fetch(`${BACKEND_URL}/api/join-requests/${meetingCode}`);
       if (response.ok) {
         const data = await response.json();
-        setRequests(data.data || []);
+        // Handle both array response and object with data property
+        const allRequests = Array.isArray(data) ? data : (data.data || []);
+        const pendingRequests = allRequests.filter((req: JoinRequest) => req.status === 'pending');
+        setRequests(pendingRequests);
+        console.log('Fetched join requests:', pendingRequests);
       }
     } catch (error) {
       console.error('Error fetching join requests:', error);
@@ -43,13 +49,57 @@ export default function JoinRequestPanel({
   };
 
   useEffect(() => {
-    if (isHostOrCohost) {
-      fetchRequests();
-      
-      // Poll for new requests every 5 seconds
-      const interval = setInterval(fetchRequests, 5000);
-      return () => clearInterval(interval);
-    }
+    if (!isHostOrCohost) return;
+
+    // Initial fetch
+    fetchRequests();
+
+    // Setup socket connection for real-time updates
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    const newSocket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+    });
+
+    newSocket.on('connect', () => {
+      console.log('JoinRequestPanel socket connected');
+      // Listen to the meeting room channel for join request events
+      // We use a special listener channel, not the actual meeting room
+      newSocket.emit('join-request-listener', { meetingCode });
+    });
+
+    // Listen for new join requests
+    newSocket.on('join-request-received', (data) => {
+      console.log('New join request received:', data);
+      // Add the new request to the list
+      setRequests(prev => [...prev, {
+        _id: data.requestId,
+        requesterName: data.requesterName,
+        requesterEmail: data.requesterEmail,
+        requesterPicture: data.requesterPicture,
+        createdAt: data.createdAt,
+        status: 'pending'
+      }]);
+    });
+
+    // Listen for accepted requests
+    newSocket.on('join-request-accepted', (data) => {
+      console.log('Join request accepted:', data);
+      // Remove from list
+      setRequests(prev => prev.filter(req => req._id !== data.requestId));
+    });
+
+    // Listen for rejected requests
+    newSocket.on('join-request-rejected', (data) => {
+      console.log('Join request rejected:', data);
+      // Remove from list
+      setRequests(prev => prev.filter(req => req._id !== data.requestId));
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
   }, [meetingCode, isHostOrCohost]);
 
   const handleAccept = async (requestId: string) => {

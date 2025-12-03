@@ -108,11 +108,15 @@ const getMeeting = async (req, res) => {
 
     let meeting;
     
-    // Try to find by meeting code first, then by ID
-    if (meetingId.length === 10) {
-      meeting = await Meeting.findByMeetingCode(meetingId);
-    } else {
+    // Check if it's a valid ObjectId (24 hex characters)
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(meetingId);
+    
+    if (isObjectId) {
+      // Try to find by ObjectId
       meeting = await Meeting.findById(meetingId);
+    } else {
+      // Try to find by meeting code
+      meeting = await Meeting.findByMeetingCode(meetingId);
     }
 
     if (!meeting) {

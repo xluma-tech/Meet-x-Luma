@@ -2,20 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { io, Socket } from 'socket.io-client';
 
 interface JoinRequestPendingProps {
   meetingCode: string;
   meetingTitle: string;
   requesterName: string;
+  onAccepted?: () => void;
 }
 
 export default function JoinRequestPending({
   meetingCode,
   meetingTitle,
   requesterName,
+  onAccepted,
 }: JoinRequestPendingProps) {
   const router = useRouter();
   const [dots, setDots] = useState('');
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [status, setStatus] = useState<'pending' | 'accepted' | 'rejected'>('pending');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -25,26 +30,112 @@ export default function JoinRequestPending({
     return () => clearInterval(interval);
   }, []);
 
+  // Setup socket connection to listen for acceptance/rejection
+  useEffect(() => {
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    const newSocket = io(socketUrl, {
+      transports: ['websocket', 'polling'],
+    });
+
+    newSocket.on('connect', () => {
+      console.log('JoinRequestPending socket connected - waiting for admission');
+      // DO NOT join the meeting room - stay in waiting room
+      // We listen to the meeting room channel for join-request events
+      // but we don't actually join as a participant
+      const pendingRequestId = localStorage.getItem('pendingRequestId');
+      if (pendingRequestId) {
+        // Join a waiting room specific to this request
+        newSocket.emit('join-waiting-room', { 
+          requestId: pendingRequestId,
+          meetingCode: meetingCode 
+        });
+      }
+    });
+
+    // Listen for acceptance
+    newSocket.on('join-request-accepted', (data) => {
+      console.log('Join request accepted!', data);
+      // Check if this is for the current user
+      const currentUserEmail = localStorage.getItem('userEmail');
+      const currentUserAuth0Id = localStorage.getItem('userAuth0Id');
+      const pendingRequestId = localStorage.getItem('pendingRequestId');
+      
+      if (data.requestId === pendingRequestId || 
+          data.requesterAuth0Id === currentUserAuth0Id || 
+          data.requesterEmail === currentUserEmail) {
+        setStatus('accepted');
+        // Clear stored data
+        localStorage.removeItem('pendingRequestId');
+        // Call the callback to revalidate and show join screen
+        if (onAccepted) {
+          setTimeout(() => {
+            onAccepted();
+          }, 1500);
+        } else {
+          // Fallback: reload the page
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        }
+      }
+    });
+
+    // Listen for rejection
+    newSocket.on('join-request-rejected', (data) => {
+      console.log('Join request rejected', data);
+      const currentUserEmail = localStorage.getItem('userEmail');
+      const currentUserAuth0Id = localStorage.getItem('userAuth0Id');
+      
+      if (data.requesterAuth0Id === currentUserAuth0Id || data.requesterEmail === currentUserEmail) {
+        setStatus('rejected');
+      }
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [meetingCode, requesterName]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-red-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
         <div className="bg-white rounded-2xl shadow-xl p-8 text-center">
           {/* Animated Icon */}
           <div className="relative w-24 h-24 mx-auto mb-6">
-            <div className="absolute inset-0 bg-gradient-to-br from-orange-500 to-red-500 rounded-full animate-pulse"></div>
+            <div className={`absolute inset-0 ${
+              status === 'accepted' ? 'bg-gradient-to-br from-green-500 to-emerald-500' :
+              status === 'rejected' ? 'bg-gradient-to-br from-red-500 to-rose-500' :
+              'bg-gradient-to-br from-orange-500 to-red-500 animate-pulse'
+            } rounded-full`}></div>
             <div className="absolute inset-2 bg-white rounded-full flex items-center justify-center">
-              <svg className="w-12 h-12 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              {status === 'accepted' ? (
+                <svg className="w-12 h-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : status === 'rejected' ? (
+                <svg className="w-12 h-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                <svg className="w-12 h-12 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              )}
             </div>
           </div>
 
           {/* Title */}
           <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Request Sent!
+            {status === 'accepted' ? 'Request Accepted!' :
+             status === 'rejected' ? 'Request Rejected' :
+             'Request Sent!'}
           </h2>
           <p className="text-gray-600 mb-6">
-            Waiting for host approval{dots}
+            {status === 'accepted' ? 'Redirecting you to the meeting...' :
+             status === 'rejected' ? 'Your request to join was declined by the host' :
+             `Waiting for host approval${dots}`}
           </p>
 
           {/* Meeting Info */}
