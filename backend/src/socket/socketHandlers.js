@@ -12,6 +12,19 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
   io.on(SOCKET_EVENTS.CONNECTION, (socket) => {
     console.log('User connected:', socket.id);
 
+    // Join waiting room handler (for users waiting for admission)
+    socket.on('join-waiting-room', ({ requestId, meetingCode }) => {
+      const waitingRoomId = `waiting-${requestId}`;
+      socket.join(waitingRoomId);
+      console.log(`User ${socket.id} joined waiting room for request ${requestId}`);
+    });
+
+    // Join request listener (for hosts/cohosts to receive join request notifications)
+    socket.on('join-request-listener', ({ meetingCode }) => {
+      socket.join(meetingCode);
+      console.log(`User ${socket.id} listening for join requests in meeting ${meetingCode}`);
+    });
+
     // Join room handler
     socket.on(SOCKET_EVENTS.JOIN_ROOM, async ({ roomId, userName }) => {
       try {
@@ -142,6 +155,56 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
     // 3D Model handlers
     require('./modelSocketHandlers')(socket, io, roomModels);
 
+    // Handle meeting end by host
+    socket.on('end-meeting', async ({ roomId, hostAuth0Id }) => {
+      try {
+        const meeting = await Meeting.findByMeetingCode(roomId);
+        
+        if (!meeting) {
+          socket.emit('error', { message: 'Meeting not found' });
+          return;
+        }
+
+        // Verify host permission
+        if (meeting.hostAuth0Id !== hostAuth0Id && !meeting.cohosts?.includes(hostAuth0Id)) {
+          socket.emit('error', { message: 'Only host can end the meeting' });
+          return;
+        }
+
+        // End the meeting
+        await Meeting.updateStatus(meeting._id, 'ended');
+        
+        // Clean up join requests from Redis
+        const joinRequestService = require('../services/joinRequestService');
+        await joinRequestService.deleteJoinRequestsByMeeting(roomId);
+        console.log(`Cleaned up join requests for meeting ${roomId}`);
+        
+        // Notify all participants that meeting has ended
+        io.to(roomId).emit('meeting-ended', {
+          message: 'This meeting has been ended by the host',
+          meetingCode: roomId
+        });
+
+        // Clear the room
+        const room = rooms.get(roomId);
+        if (room) {
+          room.clear();
+          rooms.delete(roomId);
+        }
+
+        // Clean up room model
+        const model = roomModels.get(roomId);
+        if (model) {
+          roomModels.delete(roomId);
+        }
+
+        console.log(`Meeting ${roomId} ended by host ${hostAuth0Id}`);
+      } catch (err) {
+        console.error('Error ending meeting:', err);
+        socket.emit('error', { message: 'Failed to end meeting' });
+      }
+    });
+
     // Disconnect handler
     socket.on(SOCKET_EVENTS.DISCONNECT, async () => {
       try {
@@ -160,11 +223,16 @@ const initializeSocketHandlers = (io, rooms, roomModels) => {
                 roomModels.delete(socket.roomId);
               }
               
-              // Update meeting status to ended
+              // Update meeting status to ended only if it was active
               try {
                 const meeting = await Meeting.findByMeetingCode(socket.roomId);
-                if (meeting && meeting.status !== 'ended') {
+                if (meeting && meeting.status === 'active') {
                   await Meeting.updateStatus(meeting._id, 'ended');
+                  
+                  // Clean up join requests from Redis
+                  const joinRequestService = require('../services/joinRequestService');
+                  await joinRequestService.deleteJoinRequestsByMeeting(socket.roomId);
+                  
                   console.log(`Meeting ${socket.roomId} ended - all participants left`);
                 }
               } catch (err) {

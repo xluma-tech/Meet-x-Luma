@@ -132,7 +132,7 @@ export default function Home() {
                   <input
                     type="text"
                     value={meetingCode}
-                    onChange={(e) => setMeetingCode(e.target.value.toUpperCase())}
+                    onChange={(e) => setMeetingCode(e.target.value)}
                     placeholder="Enter code"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-500 text-center text-lg font-mono"
                     autoFocus

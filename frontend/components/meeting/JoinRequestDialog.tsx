@@ -8,7 +8,7 @@ interface JoinRequestDialogProps {
   userName?: string;
   userEmail?: string;
   userAuth0Id?: string;
-  onRequestSent: () => void;
+  onRequestSent: (requestId: string) => void;
   onCancel: () => void;
 }
 
@@ -55,7 +55,18 @@ export default function JoinRequestDialog({
         throw new Error(error.error || 'Failed to send join request');
       }
 
-      onRequestSent();
+      const result = await response.json();
+      const requestId = result.data?.requestId || result.requestId;
+
+      // Store user info in localStorage for matching socket events
+      if (userAuth0Id) {
+        localStorage.setItem('userAuth0Id', userAuth0Id);
+      }
+      if (email.trim()) {
+        localStorage.setItem('userEmail', email.trim());
+      }
+
+      onRequestSent(requestId);
     } catch (error: any) {
       console.error('Error sending join request:', error);
       setError(error.message || 'Failed to send join request');

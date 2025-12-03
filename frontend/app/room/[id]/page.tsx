@@ -11,6 +11,7 @@ import { ModelViewer } from './components/ModelViewer';
 import { HandGestureControl } from './components/HandGestureControl';
 import { ModelUploadPanel } from './components/ModelUploadPanel';
 import MeetingLinkCard from '@/components/meeting/MeetingLinkCard';
+import JoinRequestPanel from '@/components/meeting/JoinRequestPanel';
 import { meetingService } from '@/lib/meetingService';
 import { MeetingContext } from './RoomWrapper';
 import dynamic from 'next/dynamic';
@@ -142,6 +143,10 @@ export default function RoomPage() {
   const [allowedControllers, setAllowedControllers] = useState<string[]>([]);
   const [handGestureEnabled, setHandGestureEnabled] = useState(false);
   const [lowPowerMode, setLowPowerMode] = useState(false);
+  const [isHost, setIsHost] = useState(false);
+  const [isCohost, setIsCohost] = useState(false);
+  const [currentUserAuth0Id, setCurrentUserAuth0Id] = useState<string | null>(null);
+  const [meetingData, setMeetingData] = useState<any>(null);
   const modelSeqRef = useRef(0);
 
   const socketRef = useRef<Socket | null>(null);
@@ -153,6 +158,7 @@ export default function RoomPage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const hasReceivedExistingUsers = useRef(false); // Track if we've processed existing-users
   const processedSignals = useRef<Set<string>>(new Set()); // Track processed signals to prevent duplicates
+  const hasJoinedRoom = useRef(false); // Track if we've already joined
 
   // Picture-in-Picture hook
   const { isPiPActive, isPageHidden } = usePictureInPicture({
@@ -169,6 +175,42 @@ export default function RoomPage() {
 
   // Performance monitoring (only in development)
   usePerformanceMonitor(isDev);
+
+  // Fetch meeting data and check if user is host/cohost
+  useEffect(() => {
+    const fetchMeetingData = async () => {
+      try {
+        const meeting = await meetingService.getMeeting(roomId);
+        if (meeting) {
+          setMeetingData(meeting);
+          console.log('Meeting data loaded:', meeting);
+
+          // Check if current user is host or cohost
+          const userResponse = await fetch('/api/auth/me');
+          if (userResponse.ok) {
+            const { user: currentUser } = await userResponse.json();
+            if (currentUser) {
+              setCurrentUserAuth0Id(currentUser.sub);
+              
+              if (meeting.hostAuth0Id === currentUser.sub) {
+                setIsHost(true);
+                console.log('User is host!');
+              }
+              
+              if (meeting.cohosts && meeting.cohosts.includes(currentUser.sub)) {
+                setIsCohost(true);
+                console.log('User is cohost!');
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching meeting data:', error);
+      }
+    };
+
+    fetchMeetingData();
+  }, [roomId]);
 
   // Automatic floating window when tab is minimized
   // Shows screen share if active, otherwise shows local video
@@ -201,6 +243,34 @@ export default function RoomPage() {
       setShowFloatingWindow(false);
     }
   }, [isPageHidden, pipEnabled, isPiPActive, showFloatingWindow]);
+
+  // Fetch meeting data and check if user is host
+  useEffect(() => {
+    const fetchMeetingData = async () => {
+      try {
+        const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:4000';
+        const response = await fetch(`${BACKEND_URL}/api/meetings/${roomId}`);
+        if (response.ok) {
+          const data = await response.json();
+          const meeting = data.data || data;
+          setMeetingData(meeting);
+
+          // Check if current user is host
+          const userResponse = await fetch('/api/auth/me');
+          if (userResponse.ok) {
+            const { user: currentUser } = await userResponse.json();
+            if (currentUser && meeting.hostAuth0Id === currentUser.sub) {
+              setIsHost(true);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching meeting data:', error);
+      }
+    };
+
+    fetchMeetingData();
+  }, [roomId]);
 
   // Close user dropdown when clicking outside
   useEffect(() => {
@@ -550,12 +620,19 @@ export default function RoomPage() {
   }, [getIceServers]);
 
   useEffect(() => {
+    // Prevent duplicate initialization
+    if (hasJoinedRoom.current) {
+      console.log('Already joined room, skipping initialization');
+      return;
+    }
+
     // Wait for userName to be available from context
     if (!userName || userName === 'Guest') {
       console.log('⏳ Waiting for userName from context...', { userName });
       return;
     }
 
+    hasJoinedRoom.current = true;
     console.log('🚀 Initializing room with userName:', userName);
     console.log('🔍 Socket.IO URL:', process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin);
 
@@ -577,6 +654,7 @@ export default function RoomPage() {
     console.log('🔌 Connecting to Socket.IO server:', socketUrl);
     socketRef.current = io(socketUrl, {
       transports: ['websocket', 'polling'],
+      reconnection: false, // Prevent automatic reconnection
     });
 
     // Socket connection event handlers
@@ -591,6 +669,13 @@ export default function RoomPage() {
     socketRef.current.on('disconnect', (reason) => {
       console.log('🔌 Socket disconnected:', reason);
     });
+
+    // Check if media devices are available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.error('Media devices not supported in this browser');
+      alert('Your browser does not support camera and microphone access. Please use a modern browser like Chrome, Firefox, or Edge.');
+      return;
+    }
 
     // Optimize video constraints based on device and power mode
     const getVideoConstraints = () => {
@@ -619,6 +704,9 @@ export default function RoomPage() {
       return baseConstraints;
     };
 
+    // Request media devices with proper error handling
+    console.log('🎥 Requesting camera and microphone access...');
+    
     navigator.mediaDevices
       .getUserMedia({
         video: {
@@ -634,16 +722,51 @@ export default function RoomPage() {
         },
       })
       .then((stream) => {
+        console.log('✅ Media devices accessed successfully');
+        console.log('Video tracks:', stream.getVideoTracks().length);
+        console.log('Audio tracks:', stream.getAudioTracks().length);
+        
+        // Log track details
+        stream.getVideoTracks().forEach((track, index) => {
+          console.log(`Video track ${index}:`, {
+            id: track.id,
+            label: track.label,
+            enabled: track.enabled,
+            readyState: track.readyState,
+            muted: track.muted
+          });
+        });
+        
+        stream.getAudioTracks().forEach((track, index) => {
+          console.log(`Audio track ${index}:`, {
+            id: track.id,
+            label: track.label,
+            enabled: track.enabled,
+            readyState: track.readyState,
+            muted: track.muted
+          });
+        });
+        
         localStreamRef.current = stream;
         if (localVideoRef.current) {
+          console.log('Setting srcObject on local video element');
           localVideoRef.current.srcObject = stream;
+          localVideoRef.current.muted = true; // Ensure muted for local video
+          localVideoRef.current.play().catch(err => {
+            if (err.name !== 'AbortError') {
+              console.error('Error playing local video:', err);
+            }
+          });
+          console.log('Local video element configured');
+        } else {
+          console.warn('localVideoRef.current is null!');
         }
 
         // Setup audio analyser for local stream
         setupAudioAnalyser(stream, 'local');
 
         console.log('📞 Joining room:', roomId, 'as:', userName);
-        console.log('🔌 Socket connected:', socketRef.current?.connected);
+        console.log('� JSocket connected:', socketRef.current?.connected);
         console.log('🆔 My socket ID:', socketRef.current?.id);
         socketRef.current?.emit('join-room', { roomId, userName });
 
@@ -691,7 +814,7 @@ export default function RoomPage() {
 
         socketRef.current?.on('user-joined', ({ userId, userName: newUserName }) => {
           console.log('👋 New user joined:', newUserName, 'userId:', userId, 'My ID:', socketRef.current?.id);
-          console.log('🔍 Have I received existing-users?', hasReceivedExistingUsers.current);
+          console.log('�  Have I received existing-users?', hasReceivedExistingUsers.current);
           
           // Ignore our own "joined" event if server broadcasts it
           if (userId === socketRef.current?.id) {
@@ -760,8 +883,10 @@ export default function RoomPage() {
           
           // Clean up old signals (keep only last 50)
           if (processedSignals.current.size > 50) {
-            const firstKey = processedSignals.current.values().next().value;
-            processedSignals.current.delete(firstKey);
+            const firstKey = processedSignals.current.values().next().value as string;
+            if (firstKey) {
+              processedSignals.current.delete(firstKey);
+            }
           }
           
           console.log(`📨 Received signal from ${from}`, signal);
@@ -791,23 +916,48 @@ export default function RoomPage() {
             item = newPeer;
           }
           
-          const peerInternal = item.peer as SimplePeer.Instance & { destroyed?: boolean; _destroying?: boolean };
+          const peerInternal = item.peer as SimplePeer.Instance & { 
+            destroyed?: boolean; 
+            _destroying?: boolean;
+            _pc?: RTCPeerConnection;
+          };
           
           try {
-            if (!peerInternal.destroyed && !peerInternal._destroying) {
-              const pc = (peerInternal as any)._pc;
-              if (pc) {
-                console.log(`🔍 Peer signaling state for ${from}:`, pc.signalingState);
+            if (peerInternal.destroyed || peerInternal._destroying) {
+              console.log(`⚠️ Ignoring signal for destroyed peer ${from}`);
+              return;
+            }
+
+            // Check RTCPeerConnection signaling state
+            if (peerInternal._pc) {
+              const signalingState = peerInternal._pc.signalingState;
+              console.log(`🔍 Peer signaling state for ${from}:`, signalingState, 'Signal type:', signal.type);
+              
+              // If we're stable and receiving an answer, something is wrong - skip it
+              if (signalingState === 'stable' && signal.type === 'answer') {
+                console.warn(`Ignoring answer signal for peer ${from} - already in stable state`);
+                return;
               }
               
-              peerInternal.signal(signal);
-              console.log(`✅ Signal applied for ${from}`);
-            } else {
-              console.log(`⚠️ Ignoring signal for destroyed peer ${from}`);
+              // If we're have-local-offer and receiving an offer, skip it
+              if (signalingState === 'have-local-offer' && signal.type === 'offer') {
+                console.warn(`Ignoring offer signal for peer ${from} - already sent offer`);
+                return;
+              }
             }
+            
+            peerInternal.signal(signal);
+            console.log(`✅ Signal applied for ${from}`);
           } catch (err) {
             const error = err as Error;
-            console.error(`❌ Error signaling peer ${from}:`, error.message);
+            // Log specific errors for debugging
+            if (error.message?.includes('setRemoteDescription') || error.message?.includes('stable')) {
+              console.warn(`WebRTC signaling error for peer ${from}:`, error.message);
+            } else if (!error.message?.includes('cannot signal after peer is destroyed') &&
+                       !error.message?.includes('User-Initiated Abort') &&
+                       !error.message?.includes('Close called')) {
+              console.error(`❌ Error signaling peer ${from}:`, error.message);
+            }
           }
         });
 
@@ -833,6 +983,18 @@ export default function RoomPage() {
           if (selectedChatUser === userId) {
             setSelectedChatUser('everyone');
           }
+        });
+
+        // Handle meeting ended by host
+        socketRef.current?.on('meeting-ended', ({ message }) => {
+          alert(message);
+          // Cleanup and redirect
+          localStreamRef.current?.getTracks().forEach((track) => track.stop());
+          screenStreamRef.current?.getTracks().forEach((track) => track.stop());
+          peersRef.current.forEach((p) => p.peer.destroy());
+          screenPeersRef.current.forEach((p) => p.peer.destroy());
+          socketRef.current?.disconnect();
+          window.location.href = '/dashboard';
         });
 
         socketRef.current?.on('chat-message', ({ userId, userName: senderName, message, timestamp }) => {
@@ -862,13 +1024,32 @@ export default function RoomPage() {
           const item = screenPeersRef.current.find((p) => p.userId === from);
           if (item && item.peer) {
             try {
-              const peerInternal = item.peer as SimplePeer.Instance & { destroyed?: boolean; _destroying?: boolean };
-              if (!peerInternal.destroyed && !peerInternal._destroying) {
-                item.peer.signal(signal);
+              const peerInternal = item.peer as SimplePeer.Instance & { 
+                destroyed?: boolean; 
+                _destroying?: boolean;
+                _pc?: RTCPeerConnection;
+              };
+              
+              if (peerInternal.destroyed || peerInternal._destroying) {
+                return;
               }
+
+              // Check signaling state for screen share too
+              if (peerInternal._pc) {
+                const signalingState = peerInternal._pc.signalingState;
+                if (signalingState === 'stable' && signal.type === 'answer') {
+                  console.warn(`Ignoring screen share answer for peer ${from} - already stable`);
+                  return;
+                }
+              }
+              
+              item.peer.signal(signal);
             } catch (err) {
               const error = err as Error;
-              if (!error.message?.includes('cannot signal after peer is destroyed')) {
+              if (error.message?.includes('setRemoteDescription') || error.message?.includes('stable')) {
+                console.warn(`Screen share signaling error for peer ${from}:`, error.message);
+              } else if (!error.message?.includes('cannot signal after peer is destroyed') &&
+                         !error.message?.includes('User-Initiated Abort')) {
                 console.error('Error signaling screen peer:', error);
               }
             }
@@ -969,7 +1150,43 @@ export default function RoomPage() {
       })
       .catch((err) => {
         console.error('Error accessing media devices:', err);
-        alert('Please allow camera and microphone access');
+        
+        // Provide more specific error messages
+        let errorMessage = 'Failed to access camera and microphone. ';
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          errorMessage += 'Please allow camera and microphone permissions in your browser settings.';
+        } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+          errorMessage += 'No camera or microphone found. Please connect a device.';
+        } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+          errorMessage += 'Camera or microphone is already in use by another application.';
+        } else if (err.name === 'OverconstrainedError') {
+          errorMessage += 'Camera settings are not supported. Trying with default settings...';
+          
+          // Retry with minimal constraints
+          navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+          }).then((stream) => {
+            localStreamRef.current = stream;
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = stream;
+            }
+            setupAudioAnalyser(stream, 'local');
+            socketRef.current?.emit('join-room', { roomId, userName });
+            console.log('✅ Media devices accessed with fallback settings');
+          }).catch((retryErr) => {
+            console.error('Retry failed:', retryErr);
+            alert('Unable to access camera and microphone. Please check your device settings.');
+          });
+          return;
+        } else {
+          errorMessage += `Error: ${err.message}`;
+        }
+        
+        alert(errorMessage);
+        
+        // Still join the room without media (audio-only or no media mode)
+        socketRef.current?.emit('join-room', { roomId, userName });
       });
     // Cleanup function
     return () => {
@@ -998,6 +1215,9 @@ export default function RoomPage() {
         audioContextRef.current = null;
       }
       analyserNodesRef.current.clear();
+      
+      // Reset join flag
+      hasJoinedRoom.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, userName]);
@@ -1259,6 +1479,35 @@ export default function RoomPage() {
     
     // Redirect to homepage
     window.location.href = '/';
+  };
+
+  const endMeeting = async () => {
+    if (!confirm('Are you sure you want to end this meeting for everyone? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      // Get user auth0Id from session
+      const response = await fetch('/api/auth/me');
+      if (!response.ok) {
+        throw new Error('Not authenticated');
+      }
+      const { user: currentUser } = await response.json();
+      
+      if (!currentUser) {
+        alert('You must be logged in to end the meeting');
+        return;
+      }
+
+      // Emit end meeting event
+      socketRef.current?.emit('end-meeting', {
+        roomId,
+        hostAuth0Id: currentUser.sub
+      });
+    } catch (error) {
+      console.error('Error ending meeting:', error);
+      alert('Failed to end meeting. Please try again.');
+    }
   };
 
   const filteredMessages =
@@ -1804,6 +2053,17 @@ export default function RoomPage() {
         </div>
 
       <div className="flex-1 flex overflow-hidden">
+        {/* Join Request Panel - For hosts/cohosts only */}
+        {(isHost || isCohost) && meetingData?.type === 'private' && currentUserAuth0Id && (
+          <div className="absolute top-20 right-4 z-50 w-80 max-h-96 overflow-y-auto">
+            <JoinRequestPanel
+              meetingCode={roomId}
+              userAuth0Id={currentUserAuth0Id}
+              isHostOrCohost={true}
+            />
+          </div>
+        )}
+
         {/* 3D Model Panel */}
         {show3DPanel && (
           <div className="absolute md:relative inset-0 md:inset-auto w-full md:w-80 bg-gray-800 md:border-r border-gray-700 flex flex-col flex-shrink-0 z-40 p-4">
@@ -2269,6 +2529,17 @@ export default function RoomPage() {
               )}
             </svg>
           </button>
+
+          {isHost && meetingData?.type === 'private' && (
+            <button
+              onClick={endMeeting}
+              className="p-2 md:p-3 px-4 md:px-6 rounded-full bg-orange-600 hover:bg-orange-700 transition-colors font-semibold text-sm md:text-base touch-manipulation"
+              title="End meeting for everyone"
+              aria-label="End meeting"
+            >
+              End Meeting
+            </button>
+          )}
 
           <button
             onClick={leaveRoom}
