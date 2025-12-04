@@ -26,6 +26,19 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
   const [userName, setUserName] = useState<string | null>(null);
   const [hasJoinedProperly, setHasJoinedProperly] = useState(false);
 
+  // Update URL with userName in useEffect (avoid side-effect in render)
+  // MUST be declared before any conditional returns to follow Rules of Hooks
+  useEffect(() => {
+    if (!userName) return;
+    if (typeof window === 'undefined') return;
+
+    const currentUrl = new URL(window.location.href);
+    if (!currentUrl.searchParams.has('name')) {
+      currentUrl.searchParams.set('name', userName);
+      window.history.replaceState({}, '', currentUrl.toString());
+    }
+  }, [userName]);
+
   useEffect(() => {
     validateMeeting();
   }, [params.id]);
@@ -185,13 +198,6 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
         </div>
       </div>
     );
-  }
-
-  // Pass userName to children via URL parameter
-  const currentUrl = new URL(window.location.href);
-  if (!currentUrl.searchParams.has('name')) {
-    currentUrl.searchParams.set('name', userName);
-    window.history.replaceState({}, '', currentUrl.toString());
   }
 
   return (

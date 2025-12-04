@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import React, { useEffect, useRef, useState, useMemo, useCallback, useContext } from 'react';
+import { useParams } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 import SimplePeer from 'simple-peer';
 import { usePictureInPicture } from './hooks/usePictureInPicture';
@@ -12,6 +12,7 @@ import { HandGestureControl } from './components/HandGestureControl';
 import { ModelUploadPanel } from './components/ModelUploadPanel';
 import MeetingLinkCard from '@/components/meeting/MeetingLinkCard';
 import { meetingService } from '@/lib/meetingService';
+import { MeetingContext } from './RoomWrapper';
 import dynamic from 'next/dynamic';
 
 // Development logging utility
@@ -94,11 +95,13 @@ const getDeviceInfo = () => {
 
 export default function RoomPage() {
   const resolvedParams = useParams();
-  const resolvedSearchParams = useSearchParams();
   const roomId = (Array.isArray(resolvedParams?.id) ? resolvedParams.id[0] : resolvedParams?.id) as string;
   
-  // Get user name from URL parameter or default to 'Guest'
-  const userName = resolvedSearchParams.get('name') || 'Guest';
+  // Get user name from MeetingContext (set by RoomWrapper)
+  const { userName: contextUserName } = useContext(MeetingContext);
+  const userName = contextUserName || 'Guest';
+  
+  console.log('🎬 RoomPage: userName from context:', userName);
 
   const [peers, setPeers] = useState<Peer[]>([]);
   const [screenPeers, setScreenPeers] = useState<ScreenPeer[]>([]); // Separate peers for screen sharing
@@ -148,6 +151,8 @@ export default function RoomPage() {
   const screenPeersRef = useRef<ScreenPeer[]>([]); // Separate ref for screen peers
   const screenStreamRef = useRef<MediaStream | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const hasReceivedExistingUsers = useRef(false); // Track if we've processed existing-users
+  const processedSignals = useRef<Set<string>>(new Set()); // Track processed signals to prevent duplicates
 
   // Picture-in-Picture hook
   const { isPiPActive, isPageHidden } = usePictureInPicture({
@@ -299,122 +304,187 @@ export default function RoomPage() {
     return () => clearInterval(interval);
   }, [detectActiveSpeaker]);
 
+  // Enhanced ICE server configuration with STUN and TURN fallback
+  const getIceServers = useCallback(() => {
+    return [
+      // Google STUN servers (free, reliable)
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // Additional STUN servers for redundancy
+      { urls: 'stun:stun.services.mozilla.com' },
+      { urls: 'stun:stun.stunprotocol.org:3478' },
+      // TURN server fallback (replace with your own TURN server)
+      // Uncomment and configure if you have a TURN server
+      // {
+      //   urls: 'turn:your-turn-server.com:3478',
+      //   username: 'your-username',
+      //   credential: 'your-password'
+      // },
+    ];
+  }, []);
+
   // Peer creation functions - declared before useEffect to avoid hoisting issues
-  const createPeer = (userToSignal: string, stream: MediaStream) => {
+  const createPeer = useCallback((userToSignal: string, stream: MediaStream) => {
+    console.log(`📞 Creating INITIATOR peer (initiator=true) to ${userToSignal}`);
     const peer = new SimplePeer({
       initiator: true,
       trickle: true,
       stream,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-        ],
+        iceServers: getIceServers(),
+        iceTransportPolicy: 'all', // Try all candidates (relay, srflx, host)
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       },
     });
 
     peer.on('signal', (signal) => {
+      console.log(`📡 Sending signal to ${userToSignal}`);
       socketRef.current?.emit('signal', { to: userToSignal, signal });
     });
 
     peer.on('stream', (remoteStream) => {
-      devLog(`Received camera stream from ${userToSignal}:`, remoteStream.id);
+      console.log(`✅ Received camera stream from ${userToSignal}:`, remoteStream.id);
+      console.log(`📹 Stream tracks:`, remoteStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState })));
       const peerIndex = peersRef.current.findIndex((p) => p.userId === userToSignal);
       if (peerIndex !== -1) {
         peersRef.current[peerIndex].stream = remoteStream;
         setPeers([...peersRef.current]);
-        devLog(`Camera stream set for peer ${userToSignal}`);
+        console.log(`✅ Camera stream set for peer ${userToSignal}. Total peers with streams:`, peersRef.current.filter(p => p.stream).length);
         
         // Setup audio analyser for speaker detection
         setupAudioAnalyser(remoteStream, userToSignal);
+      } else {
+        console.error(`❌ Peer index not found for ${userToSignal}`);
       }
+    });
+
+    peer.on('connect', () => {
+      console.log(`🔗 Peer connected to ${userToSignal}`);
     });
 
     peer.on('error', (err: Error) => {
       if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
         return;
       }
+      console.error(`❌ Peer error with ${userToSignal}:`, err);
       trackError(err, 'Camera Peer Connection');
     });
 
     peer.on('close', () => {
-      // Peer connection closed
+      console.log(`🔌 Peer connection closed with ${userToSignal}`);
     });
 
-    return peer;
-  };
+    // Monitor ICE connection state
+    const peerConnection = (peer as any)._pc;
+    if (peerConnection) {
+      peerConnection.oniceconnectionstatechange = () => {
+        console.log(`🧊 ICE connection state with ${userToSignal}:`, peerConnection.iceConnectionState);
+        if (peerConnection.iceConnectionState === 'failed') {
+          console.error(`❌ ICE connection failed with ${userToSignal}`);
+        }
+      };
+      
+      peerConnection.onconnectionstatechange = () => {
+        console.log(`🔗 Connection state with ${userToSignal}:`, peerConnection.connectionState);
+      };
+    }
 
-  const addPeer = (incomingSignal: string, stream: MediaStream) => {
+    return peer;
+  }, [getIceServers, setupAudioAnalyser]);
+
+  const addPeer = useCallback((incomingSignal: string, stream: MediaStream) => {
+    console.log(`👂 Creating NON-INITIATOR peer (initiator=false) from ${incomingSignal}`);
     const peer = new SimplePeer({
       initiator: false,
       trickle: true,
       stream,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-        ],
+        iceServers: getIceServers(),
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       },
     });
 
     peer.on('signal', (signal) => {
+      console.log(`📡 Sending signal to ${incomingSignal}`);
       socketRef.current?.emit('signal', { to: incomingSignal, signal });
     });
 
     peer.on('stream', (remoteStream) => {
-      console.log(`Received camera stream from ${incomingSignal}:`, remoteStream.id);
+      console.log(`✅ Received camera stream from ${incomingSignal}:`, remoteStream.id);
+      console.log(`📹 Stream tracks:`, remoteStream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState })));
       const peerIndex = peersRef.current.findIndex((p) => p.userId === incomingSignal);
       if (peerIndex !== -1) {
         peersRef.current[peerIndex].stream = remoteStream;
         setPeers([...peersRef.current]);
-        console.log(`Camera stream set for peer ${incomingSignal}`);
+        console.log(`✅ Camera stream set for peer ${incomingSignal}. Total peers with streams:`, peersRef.current.filter(p => p.stream).length);
         
         // Setup audio analyser for speaker detection
         setupAudioAnalyser(remoteStream, incomingSignal);
+      } else {
+        console.error(`❌ Peer index not found for ${incomingSignal}`);
       }
+    });
+
+    peer.on('connect', () => {
+      console.log(`🔗 Peer connected from ${incomingSignal}`);
     });
 
     peer.on('error', (err: Error) => {
       if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
         return;
       }
-      console.error('Peer error:', err);
+      console.error(`❌ Peer error with ${incomingSignal}:`, err);
     });
 
     peer.on('close', () => {
-      // Peer connection closed
+      console.log(`🔌 Peer connection closed with ${incomingSignal}`);
     });
 
-    return peer;
-  };
+    // Monitor ICE connection state
+    const peerConnection = (peer as any)._pc;
+    if (peerConnection) {
+      peerConnection.oniceconnectionstatechange = () => {
+        console.log(`🧊 ICE connection state with ${incomingSignal}:`, peerConnection.iceConnectionState);
+        if (peerConnection.iceConnectionState === 'failed') {
+          console.error(`❌ ICE connection failed with ${incomingSignal}`);
+        }
+      };
+      
+      peerConnection.onconnectionstatechange = () => {
+        console.log(`🔗 Connection state with ${incomingSignal}:`, peerConnection.connectionState);
+      };
+    }
 
-  const createScreenPeer = (userToSignal: string, stream: MediaStream) => {
+    return peer;
+  }, [getIceServers, setupAudioAnalyser]);
+
+  const createScreenPeer = useCallback((userToSignal: string, stream: MediaStream) => {
+    console.log(`📺 Creating screen peer connection to ${userToSignal}`);
     const peer = new SimplePeer({
       initiator: true,
       trickle: true,
       stream,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-        ],
+        iceServers: getIceServers(),
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       },
     });
 
     peer.on('signal', (signal) => {
+      console.log(`📡 Sending screen signal to ${userToSignal}`);
       socketRef.current?.emit('screen-signal', { to: userToSignal, signal });
     });
 
     peer.on('stream', (remoteStream) => {
+      console.log(`✅ Received screen stream from ${userToSignal}`);
       const peerIndex = screenPeersRef.current.findIndex((p) => p.userId === userToSignal);
       if (peerIndex !== -1) {
         screenPeersRef.current[peerIndex].stream = remoteStream;
@@ -422,57 +492,73 @@ export default function RoomPage() {
       }
     });
 
+    peer.on('connect', () => {
+      console.log(`🔗 Screen peer connected to ${userToSignal}`);
+    });
+
     peer.on('error', (err: Error) => {
       if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
         return;
       }
-      console.error('Screen peer error:', err);
+      console.error(`❌ Screen peer error with ${userToSignal}:`, err);
     });
 
     return peer;
-  };
+  }, [getIceServers]);
 
-  const addScreenPeer = (incomingSignal: string, stream: MediaStream) => {
+  const addScreenPeer = useCallback((incomingSignal: string, stream: MediaStream) => {
+    console.log(`📺 Adding screen peer connection from ${incomingSignal}`);
     const peer = new SimplePeer({
       initiator: false,
       trickle: true,
       stream,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-        ],
+        iceServers: getIceServers(),
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
       },
     });
 
     peer.on('signal', (signal) => {
+      console.log(`📡 Sending screen signal to ${incomingSignal}`);
       socketRef.current?.emit('screen-signal', { to: incomingSignal, signal });
     });
 
     peer.on('stream', (remoteStream) => {
-      console.log(`Screen peer received stream from ${incomingSignal}:`, remoteStream.id);
+      console.log(`✅ Screen peer received stream from ${incomingSignal}:`, remoteStream.id);
       const peerIndex = screenPeersRef.current.findIndex((p) => p.userId === incomingSignal);
       if (peerIndex !== -1) {
         screenPeersRef.current[peerIndex].stream = remoteStream;
         setScreenPeers([...screenPeersRef.current]);
-        console.log(`Screen peer stream set for ${incomingSignal}`);
+        console.log(`✅ Screen peer stream set for ${incomingSignal}`);
       }
+    });
+
+    peer.on('connect', () => {
+      console.log(`🔗 Screen peer connected from ${incomingSignal}`);
     });
 
     peer.on('error', (err: Error) => {
       if (err.message?.includes('User-Initiated Abort') || err.message?.includes('Close called')) {
         return;
       }
-      console.error('Screen peer error:', err);
+      console.error(`❌ Screen peer error with ${incomingSignal}:`, err);
     });
 
     return peer;
-  };
+  }, [getIceServers]);
 
   useEffect(() => {
+    // Wait for userName to be available from context
+    if (!userName || userName === 'Guest') {
+      console.log('⏳ Waiting for userName from context...', { userName });
+      return;
+    }
+
+    console.log('🚀 Initializing room with userName:', userName);
+    console.log('🔍 Socket.IO URL:', process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin);
+
     // Fetch meeting title
     const fetchMeetingTitle = async () => {
       const meeting = await meetingService.getMeeting(roomId);
@@ -488,8 +574,22 @@ export default function RoomPage() {
     devLog('Device Info:', info);
 
     const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    console.log('🔌 Connecting to Socket.IO server:', socketUrl);
     socketRef.current = io(socketUrl, {
       transports: ['websocket', 'polling'],
+    });
+
+    // Socket connection event handlers
+    socketRef.current.on('connect', () => {
+      console.log('✅ Socket connected! ID:', socketRef.current?.id);
+    });
+
+    socketRef.current.on('connect_error', (error) => {
+      console.error('❌ Socket connection error:', error);
+    });
+
+    socketRef.current.on('disconnect', (reason) => {
+      console.log('🔌 Socket disconnected:', reason);
     });
 
     // Optimize video constraints based on device and power mode
@@ -542,11 +642,41 @@ export default function RoomPage() {
         // Setup audio analyser for local stream
         setupAudioAnalyser(stream, 'local');
 
+        console.log('📞 Joining room:', roomId, 'as:', userName);
+        console.log('🔌 Socket connected:', socketRef.current?.connected);
+        console.log('🆔 My socket ID:', socketRef.current?.id);
         socketRef.current?.emit('join-room', { roomId, userName });
 
         socketRef.current?.on('existing-users', (users: Array<{ userId: string; userName: string }>) => {
+          console.log('👥 Existing users in room:', users.length, 'My ID:', socketRef.current?.id);
+          console.log('📋 User list:', users);
+          
+          // Mark that we've received existing-users (we are the NEW user)
+          hasReceivedExistingUsers.current = true;
+          console.log('🆕 I am the NEW user joining the room');
+          
+          // Clear any existing peers first to prevent duplicates
+          peersRef.current.forEach((p) => {
+            try {
+              console.log('🗑️ Destroying old peer:', p.userId);
+              p.peer.destroy();
+            } catch (err) {
+              console.error('Error destroying old peer:', err);
+            }
+          });
+          
+          // IMPORTANT: New user INITIATES connections to all existing users
+          // This prevents "Cannot set remote answer in state stable" errors
           const newPeers: Peer[] = [];
           users.forEach((user) => {
+            // Skip self (shouldn't happen, but safety check)
+            if (user.userId === socketRef.current?.id) {
+              console.warn('⚠️ Skipping self in existing-users:', user.userId);
+              return;
+            }
+            
+            console.log('📞 I am the NEW user (initiator=true), connecting to existing user:', user.userName, 'userId:', user.userId);
+            // Create an initiator peer (initiator: true)
             const peer = createPeer(user.userId, stream);
             newPeers.push({
               peer,
@@ -556,41 +686,133 @@ export default function RoomPage() {
           });
           peersRef.current = newPeers;
           setPeers(newPeers);
+          console.log('✅ Ready, initiated connections to', newPeers.length, 'existing users');
         });
 
         socketRef.current?.on('user-joined', ({ userId, userName: newUserName }) => {
+          console.log('👋 New user joined:', newUserName, 'userId:', userId, 'My ID:', socketRef.current?.id);
+          console.log('🔍 Have I received existing-users?', hasReceivedExistingUsers.current);
+          
+          // Ignore our own "joined" event if server broadcasts it
+          if (userId === socketRef.current?.id) {
+            console.log('🔁 user-joined event for myself, ignoring');
+            return;
+          }
+          
+          // If we received existing-users, we are the NEW user
+          // We should NOT process user-joined for users we already connected to
+          if (hasReceivedExistingUsers.current) {
+            const existingPeer = peersRef.current.find((p) => p.userId === userId);
+            if (existingPeer) {
+              console.log('⚠️ I am the NEW user, ignoring user-joined for user I already initiated to:', userId);
+              return;
+            }
+            // If it's a different user joining after us, we become an existing user for them
+            console.log('👂 Another new user joined after me, I am now an EXISTING user for them');
+          }
+          
+          // Check if peer already exists (prevent duplicates)
+          const existingPeer = peersRef.current.find((p) => p.userId === userId);
+          if (existingPeer) {
+            console.error('❌ DUPLICATE PEER DETECTED for', userId, '- this indicates a race condition!');
+            console.error('❌ This peer should NOT exist yet. Destroying it...');
+            try {
+              existingPeer.peer.destroy();
+            } catch (err) {
+              console.error('Error destroying duplicate peer:', err);
+            }
+            peersRef.current = peersRef.current.filter((p) => p.userId !== userId);
+            setPeers([...peersRef.current]);
+          }
+          
+          // IMPORTANT: Existing users create NON-INITIATOR peers
+          // The new user will initiate the connection (via existing-users)
+          console.log('👂 I am an EXISTING user (initiator=false), waiting for offer from new user:', userId);
+          
+          // Non-initiator: initiator: false
           const peer = addPeer(userId, stream);
-          const newPeer = {
+          
+          const newPeer: Peer = {
             peer,
             userId,
             userName: newUserName,
           };
+          
           peersRef.current = [...peersRef.current, newPeer];
           setPeers([...peersRef.current]);
+          
+          console.log('✅ Non-initiator peer added for', userId, '. Total peers:', peersRef.current.length);
+          console.log('📊 Current peers:', peersRef.current.map(p => ({ id: p.userId, name: p.userName })));
         });
 
         socketRef.current?.on('signal', ({ from, signal }) => {
-          const item = peersRef.current.find((p) => p.userId === from);
-          if (item && item.peer) {
-            try {
-              // Check if peer is not destroyed before signaling
-              const peerInternal = item.peer as SimplePeer.Instance & { destroyed?: boolean; _destroying?: boolean };
-              if (!peerInternal.destroyed && !peerInternal._destroying) {
-                item.peer.signal(signal);
-              } else {
-                console.log(`Ignoring signal for destroyed peer ${from}`);
-              }
-            } catch (err) {
-              const error = err as Error;
-              // Silently ignore errors for destroyed peers
-              if (!error.message?.includes('cannot signal after peer is destroyed')) {
-                console.error('Error signaling peer:', error);
-              }
+          // Create a unique key for this signal to detect duplicates
+          const signalKey = `${from}-${signal.type}-${JSON.stringify(signal).substring(0, 100)}`;
+          
+          // Check if we've already processed this exact signal
+          if (processedSignals.current.has(signalKey)) {
+            console.warn(`⚠️ Duplicate signal detected from ${from}, type: ${signal.type}, ignoring`);
+            return;
+          }
+          
+          // Mark this signal as processed
+          processedSignals.current.add(signalKey);
+          
+          // Clean up old signals (keep only last 50)
+          if (processedSignals.current.size > 50) {
+            const firstKey = processedSignals.current.values().next().value;
+            processedSignals.current.delete(firstKey);
+          }
+          
+          console.log(`📨 Received signal from ${from}`, signal);
+          
+          let item = peersRef.current.find((p) => p.userId === from);
+          
+          // If peer not found (race condition), create a NON-INITIATOR peer on-the-fly
+          if (!item) {
+            console.warn(`⚠️ No peer found for ${from} on signal, creating NON-INITIATOR peer on-the-fly`);
+            
+            if (!localStreamRef.current) {
+              console.error('❌ No localStreamRef.current available to create peer');
+              return;
             }
+            
+            const peer = addPeer(from, localStreamRef.current); // initiator: false
+            
+            const newPeer: Peer = {
+              peer,
+              userId: from,
+              userName: 'Unknown', // will be corrected when user-joined / existing-users fires
+            };
+            
+            peersRef.current.push(newPeer);
+            setPeers([...peersRef.current]);
+            
+            item = newPeer;
+          }
+          
+          const peerInternal = item.peer as SimplePeer.Instance & { destroyed?: boolean; _destroying?: boolean };
+          
+          try {
+            if (!peerInternal.destroyed && !peerInternal._destroying) {
+              const pc = (peerInternal as any)._pc;
+              if (pc) {
+                console.log(`🔍 Peer signaling state for ${from}:`, pc.signalingState);
+              }
+              
+              peerInternal.signal(signal);
+              console.log(`✅ Signal applied for ${from}`);
+            } else {
+              console.log(`⚠️ Ignoring signal for destroyed peer ${from}`);
+            }
+          } catch (err) {
+            const error = err as Error;
+            console.error(`❌ Error signaling peer ${from}:`, error.message);
           }
         });
 
         socketRef.current?.on('user-left', ({ userId }) => {
+          console.log('👋 User left:', userId);
           const peerObj = peersRef.current.find((p) => p.userId === userId);
           if (peerObj) {
             peerObj.peer.destroy();
@@ -749,12 +971,25 @@ export default function RoomPage() {
         console.error('Error accessing media devices:', err);
         alert('Please allow camera and microphone access');
       });
-
+    // Cleanup function
     return () => {
+      console.log('🧹 Cleaning up room connection');
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       screenStreamRef.current?.getTracks().forEach((track) => track.stop());
-      peersRef.current.forEach((p) => p.peer.destroy());
-      screenPeersRef.current.forEach((p) => p.peer.destroy());
+      peersRef.current.forEach((p) => {
+        try {
+          p.peer.destroy();
+        } catch (err) {
+          console.error('Error destroying peer:', err);
+        }
+      });
+      screenPeersRef.current.forEach((p) => {
+        try {
+          p.peer.destroy();
+        } catch (err) {
+          console.error('Error destroying screen peer:', err);
+        }
+      });
       socketRef.current?.disconnect();
       
       // Cleanup audio context
@@ -1036,6 +1271,21 @@ export default function RoomPage() {
         );
 
   const totalParticipants = peers.length + 1;
+
+  // Debug: Log peer state changes
+  useEffect(() => {
+    console.log('👥 Peers state updated:', {
+      totalPeers: peers.length,
+      peersWithStreams: peers.filter(p => p.stream).length,
+      peerDetails: peers.map(p => ({
+        userId: p.userId,
+        userName: p.userName,
+        hasStream: !!p.stream,
+        streamId: p.stream?.id,
+        streamTracks: p.stream?.getTracks().length
+      }))
+    });
+  }, [peers]);
 
   // Filter users based on search query
   const filteredUsers = useMemo(() => {
