@@ -1,12 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, createContext } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { meetingService } from '@/lib/meetingService';
 import { useUser } from '@/lib/useUser';
 import JoinRequestDialog from '@/components/meeting/JoinRequestDialog';
 import JoinRequestPending from '@/components/meeting/JoinRequestPending';
 import JoinMeetingScreen from '@/components/meeting/JoinMeetingScreen';
+
+export const MeetingContext = createContext<{
+  userName: string | null;
+  meeting: any;
+}>({ userName: null, meeting: null });
 
 export default function RoomWrapper({ children }: { children: React.ReactNode }) {
   const params = useParams();
@@ -74,9 +79,13 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
   const handleJoinMeeting = async (name: string) => {
     setUserName(name);
     
-    // Update meeting status to active if it's scheduled
-    if (meeting && meeting.status === 'scheduled') {
-      await meetingService.updateMeetingStatus(meeting._id, 'active');
+    try {
+      // Update meeting status to active if it's scheduled
+      if (meeting && meeting.status === 'scheduled') {
+        await meetingService.updateMeetingStatus(meeting._id, 'active');
+      }
+    } catch (err) {
+      console.error('Error updating meeting status:', err);
     }
     
     setShowJoinScreen(false);
@@ -166,5 +175,9 @@ export default function RoomWrapper({ children }: { children: React.ReactNode })
     }
   }
 
-  return <>{children}</>;
+  return (
+    <MeetingContext.Provider value={{ userName, meeting }}>
+      {children}
+    </MeetingContext.Provider>
+  );
 }
