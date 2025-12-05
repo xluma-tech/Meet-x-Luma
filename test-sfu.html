@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SFU Test - LiveKit</title>
+  <script src="https://unpkg.com/livekit-client/dist/livekit-client.umd.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: white;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin-bottom: 20px;
+      color: #4CAF50;
+    }
+    .status {
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .status.connecting { border-left: 4px solid #FFC107; }
+    .status.connected { border-left: 4px solid #4CAF50; }
+    .status.error { border-left: 4px solid #f44336; }
+    #videos {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    video {
+      width: 100%;
+      background: #000;
+      border-radius: 8px;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      background: #4CAF50;
+      color: white;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    button.danger {
+      background: #f44336;
+    }
+    button.danger:hover {
+      background: #da190b;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+    .info h3 {
+      margin-bottom: 10px;
+      color: #4CAF50;
+    }
+    .info ul {
+      list-style: none;
+      padding-left: 0;
+    }
+    .info li {
+      padding: 5px 0;
+      border-bottom: 1px solid #3a3a3a;
+    }
+    .info li:last-child {
+      border-bottom: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎥 SFU Test - LiveKit</h1>
+    
+    <div id="status" class="status connecting">
+      <strong>Status:</strong> <span id="statusText">Initializing...</span>
+    </div>
+
+    <div id="videos"></div>
+
+    <div class="controls">
+      <button id="connect" onclick="connectToRoom()">Connect to Room</button>
+      <button id="toggleAudio" onclick="toggleAudio()" disabled>Mute Audio</button>
+      <button id="toggleVideo" onclick="toggleVideo()" disabled>Stop Video</button>
+      <button id="leave" class="danger" onclick="leaveRoom()" disabled>Leave Room</button>
+    </div>
+
+    <div class="info">
+      <h3>📋 Instructions</h3>
+      <ul>
+        <li><strong>1.</strong> Make sure LiveKit server is running: <code>livekit-server --config livekit-dev.yaml</code></li>
+        <li><strong>2.</strong> Make sure backend is running: <code>cd backend && npm run dev</code></li>
+        <li><strong>3.</strong> Click "Connect to Room"</li>
+        <li><strong>4.</strong> Open this page in another tab to test multi-party</li>
+        <li><strong>5.</strong> Check browser console for detailed logs</li>
+      </ul>
+    </div>
+
+    <div class="info" style="margin-top: 20px;">
+      <h3>🔍 Debug Info</h3>
+      <ul id="debugInfo">
+        <li>Backend URL: <span id="backendUrl">http://localhost:4000</span></li>
+        <li>Room ID: <span id="roomId">test-room</span></li>
+        <li>Participants: <span id="participantCount">0</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    const BACKEND_URL = 'http://localhost:4000';
+    const ROOM_NAME = 'test-room';
+    
+    let room = null;
+    let isAudioEnabled = true;
+    let isVideoEnabled = true;
+
+    function updateStatus(text, type = 'connecting') {
+      const statusEl = document.getElementById('status');
+      const statusTextEl = document.getElementById('statusText');
+      statusEl.className = `status ${type}`;
+      statusTextEl.textContent = text;
+    }
+
+    async function connectToRoom() {
+      try {
+        updateStatus('Requesting access token...', 'connecting');
+        console.log('🔑 Requesting access token from backend...');
+
+        // Get access token
+        const response = await fetch(`${BACKEND_URL}/api/rooms/${ROOM_NAME}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            identity: `user-${Math.random().toString(36).substr(2, 9)}`,
+            name: 'Test User',
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Backend error: ${response.status}`);
+        }
+
+        const { token, wsUrl } = await response.json();
+        console.log('✅ Received token, connecting to:', wsUrl);
+
+        updateStatus('Connecting to LiveKit...', 'connecting');
+
+        // Create room
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // Event listeners
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, handleTrackSubscribed);
+        room.on(LivekitClient.RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+        room.on(LivekitClient.RoomEvent.ParticipantConnected, handleParticipantConnected);
+        room.on(LivekitClient.RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
+        room.on(LivekitClient.RoomEvent.Disconnected, handleDisconnected);
+
+        // Connect
+        await room.connect(wsUrl, token);
+        console.log('✅ Connected to room:', room.name);
+
+        updateStatus('Publishing camera and microphone...', 'connecting');
+
+        // Publish camera and microphone
+        await room.localParticipant.enableCameraAndMicrophone();
+        console.log('✅ Published local tracks');
+
+        updateStatus('Connected! 🎉', 'connected');
+
+        // Display local video
+        displayLocalVideo();
+
+        // Enable controls
+        document.getElementById('connect').disabled = true;
+        document.getElementById('toggleAudio').disabled = false;
+        document.getElementById('toggleVideo').disabled = false;
+        document.getElementById('leave').disabled = false;
+
+        updateParticipantCount();
+      } catch (error) {
+        console.error('❌ Error connecting:', error);
+        updateStatus(`Error: ${error.message}`, 'error');
+        alert('Failed to connect: ' + error.message);
+      }
+    }
+
+    function displayLocalVideo() {
+      const videoTrack = room.localParticipant.getTrackPublication(LivekitClient.Track.Source.Camera);
+      if (videoTrack && videoTrack.track) {
+        const videoElement = videoTrack.track.attach();
+        videoElement.muted = true;
+        videoElement.style.border = '3px solid #4CAF50';
+        document.getElementById('videos').appendChild(videoElement);
+      }
+    }
+
+    function handleTrackSubscribed(track, publication, participant) {
+      console.log('📹 Track subscribed:', track.kind, 'from', participant.identity);
+      
+      if (track.kind === LivekitClient.Track.Kind.Video || track.kind === LivekitClient.Track.Kind.Audio) {
+        const element = track.attach();
+        if (track.kind === LivekitClient.Track.Kind.Video) {
+          element.style.border = '3px solid #2196F3';
+        }
+        document.getElementById('videos').appendChild(element);
+      }
+      
+      updateParticipantCount();
+    }
+
+    function handleTrackUnsubscribed(track, publication, participant) {
+      console.log('📹 Track unsubscribed:', track.kind, 'from', participant.identity);
+      track.detach().forEach(el => el.remove());
+      updateParticipantCount();
+    }
+
+    function handleParticipantConnected(participant) {
+      console.log('👋 Participant connected:', participant.identity);
+      updateParticipantCount();
+    }
+
+    function handleParticipantDisconnected(participant) {
+      console.log('👋 Participant disconnected:', participant.identity);
+      updateParticipantCount();
+    }
+
+    function handleDisconnected() {
+      console.log('🔌 Disconnected from room');
+      updateStatus('Disconnected', 'error');
+      document.getElementById('connect').disabled = false;
+      document.getElementById('toggleAudio').disabled = true;
+      document.getElementById('toggleVideo').disabled = true;
+      document.getElementById('leave').disabled = true;
+      document.getElementById('videos').innerHTML = '';
+      updateParticipantCount();
+    }
+
+    function updateParticipantCount() {
+      if (!room) {
+        document.getElementById('participantCount').textContent = '0';
+        return;
+      }
+      const count = 1 + room.remoteParticipants.size;
+      document.getElementById('participantCount').textContent = count;
+    }
+
+    async function toggleAudio() {
+      if (!room) return;
+      isAudioEnabled = !isAudioEnabled;
+      await room.localParticipant.setMicrophoneEnabled(isAudioEnabled);
+      document.getElementById('toggleAudio').textContent = isAudioEnabled ? 'Mute Audio' : 'Unmute Audio';
+      console.log('🎤 Audio:', isAudioEnabled ? 'enabled' : 'disabled');
+    }
+
+    async function toggleVideo() {
+      if (!room) return;
+      isVideoEnabled = !isVideoEnabled;
+      await room.localParticipant.setCameraEnabled(isVideoEnabled);
+      document.getElementById('toggleVideo').textContent = isVideoEnabled ? 'Stop Video' : 'Start Video';
+      console.log('📹 Video:', isVideoEnabled ? 'enabled' : 'disabled');
+    }
+
+    function leaveRoom() {
+      if (room) {
+        room.disconnect();
+      }
+    }
+
+    // Auto-connect on load (optional)
+    // connectToRoom();
+  </script>
+</body>
+</html>
