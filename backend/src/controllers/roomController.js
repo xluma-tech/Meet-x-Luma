@@ -50,6 +50,11 @@ const joinRoomSFU = async (req, res) => {
     const { roomId } = req.params;
     const { identity, name } = req.body;
 
+    console.log('📞 Join room request:');
+    console.log('  Room ID:', roomId);
+    console.log('  Identity:', identity);
+    console.log('  Name:', name);
+
     if (!identity || !name) {
       return res.status(400).json({ 
         error: 'Missing required fields: identity and name' 
@@ -60,7 +65,16 @@ const joinRoomSFU = async (req, res) => {
     let meeting = await Meeting.findByMeetingCode(roomId);
     
     if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
+      // Create a temporary meeting for ad-hoc rooms
+      console.log('📝 Creating ad-hoc meeting for room:', roomId);
+      meeting = await Meeting.create({
+        title: `Room ${roomId}`,
+        meetingCode: roomId,
+        hostAuth0Id: identity, // First person becomes host
+        status: 'scheduled',
+        isPrivate: false,
+        scheduledTime: new Date(),
+      });
     }
 
     // Check if meeting is active or scheduled
@@ -75,7 +89,7 @@ const joinRoomSFU = async (req, res) => {
     });
 
     // Generate access token
-    const token = createToken(
+    const token = await createToken(
       roomId,
       identity,
       name,
@@ -104,8 +118,10 @@ const joinRoomSFU = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Error joining room (SFU):', error);
-    res.status(500).json({ error: 'Failed to join room' });
+    console.error('❌ Error joining room (SFU):', error);
+    console.error('❌ Error stack:', error.stack);
+    console.error('❌ Error message:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to join room' });
   }
 };
 

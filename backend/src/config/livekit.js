@@ -15,7 +15,14 @@ const LIVEKIT_URL = process.env.LIVEKIT_URL || 'ws://localhost:7880';
  * @param {object} metadata - Additional metadata
  * @returns {string} JWT token
  */
-const createToken = (roomName, participantIdentity, participantName, metadata = {}) => {
+const createToken = async (roomName, participantIdentity, participantName, metadata = {}) => {
+  console.log('🔑 Creating LiveKit token with:');
+  console.log('  API Key:', LIVEKIT_API_KEY);
+  console.log('  API Secret:', LIVEKIT_API_SECRET ? '***' + LIVEKIT_API_SECRET.slice(-4) : 'NOT SET');
+  console.log('  Room:', roomName);
+  console.log('  Identity:', participantIdentity);
+  console.log('  Name:', participantName);
+  
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: participantIdentity,
     name: participantName,
@@ -30,13 +37,17 @@ const createToken = (roomName, participantIdentity, participantName, metadata = 
     canPublishData: true,
   });
 
-  return at.toJwt();
+  const token = await at.toJwt();
+  console.log('  Token (first 50 chars):', token.substring(0, 50) + '...');
+  console.log('  Token length:', token.length);
+
+  return token;
 };
 
 /**
  * Create token with custom permissions
  */
-const createTokenWithPermissions = (roomName, participantIdentity, participantName, permissions = {}) => {
+const createTokenWithPermissions = async (roomName, participantIdentity, participantName, permissions = {}) => {
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: participantIdentity,
     name: participantName,
@@ -53,7 +64,7 @@ const createTokenWithPermissions = (roomName, participantIdentity, participantNa
     recorder: permissions.recorder || false,
   });
 
-  return at.toJwt();
+  return await at.toJwt();
 };
 
 module.exports = {

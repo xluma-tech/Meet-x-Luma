@@ -9,7 +9,7 @@ class Meeting {
 
   static async create(meetingData) {
     const meeting = {
-      meetingCode: nanoid(10), // Unique meeting code
+      meetingCode: meetingData.meetingCode || nanoid(10), // Use provided code or generate unique meeting code
       title: meetingData.title,
       description: meetingData.description || '',
       scheduledTime: meetingData.scheduledTime ? new Date(meetingData.scheduledTime) : null,

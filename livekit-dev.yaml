@@ -1,0 +1,26 @@
+# LiveKit Development Configuration
+# This matches the credentials in backend/.env
+
+port: 7880
+rtc:
+  port_range_start: 7882
+  port_range_end: 7882
+  use_external_ip: false
+
+# IMPORTANT: These must match backend/.env
+keys:
+  devkey: secret
+
+# Room settings
+room:
+  auto_create: true
+  empty_timeout: 300  # 5 minutes
+  max_participants: 100
+
+# Logging
+logging:
+  level: info
+  sample: false
+
+# Development mode
+dev_mode: true

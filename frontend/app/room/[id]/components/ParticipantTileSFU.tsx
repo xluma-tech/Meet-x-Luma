@@ -10,6 +10,8 @@ interface ParticipantTileSFUProps {
 export default function ParticipantTileSFU({ participant }: ParticipantTileSFUProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [hasVideo, setHasVideo] = React.useState(false);
+  const [, forceUpdate] = React.useState({});
 
   useEffect(() => {
     if (!participant) return;
@@ -17,9 +19,39 @@ export default function ParticipantTileSFU({ participant }: ParticipantTileSFUPr
     const attachTracks = () => {
       // Attach video track
       const videoPublication = participant.getTrackPublication(Track.Source.Camera);
+      
+      if (videoPublication) {
+        console.log('📹 Video publication found for:', participant.identity, {
+          isSubscribed: videoPublication.isSubscribed,
+          isMuted: videoPublication.isMuted,
+          hasTrack: !!videoPublication.track,
+          kind: videoPublication.kind,
+        });
+      }
+      
       if (videoPublication?.track && videoRef.current) {
         const videoTrack = videoPublication.track;
+        
+        // Detach any existing track first
+        if (videoRef.current.srcObject) {
+          const stream = videoRef.current.srcObject as MediaStream;
+          stream.getTracks().forEach(t => {
+            if (t !== videoTrack.mediaStreamTrack) {
+              stream.removeTrack(t);
+            }
+          });
+        }
+        
         videoTrack.attach(videoRef.current);
+        setHasVideo(true);
+        console.log('✅ Attached video track for:', participant.identity, 'isLocal:', participant.isLocal);
+      } else {
+        setHasVideo(false);
+        if (!videoPublication) {
+          console.log('⚠️ No video publication for:', participant.identity);
+        } else if (!videoPublication.track) {
+          console.log('⚠️ Video publication exists but no track for:', participant.identity);
+        }
       }
 
       // Attach audio track (only for remote participants)
@@ -28,22 +60,50 @@ export default function ParticipantTileSFU({ participant }: ParticipantTileSFUPr
         if (audioPublication?.track && audioRef.current) {
           const audioTrack = audioPublication.track;
           audioTrack.attach(audioRef.current);
+          console.log('🎤 Attached audio track for:', participant.identity);
         }
       }
     };
 
     attachTracks();
 
+    // Periodic check to ensure tracks are attached (fallback for race conditions)
+    const intervalId = setInterval(() => {
+      const videoPublication = participant.getTrackPublication(Track.Source.Camera);
+      if (videoPublication?.track && !hasVideo && videoRef.current) {
+        console.log('🔄 Periodic check: Re-attaching video track for:', participant.identity);
+        attachTracks();
+      }
+    }, 1000);
+
     // Listen for track updates
-    const handleTrackSubscribed = () => attachTracks();
-    const handleTrackUnsubscribed = () => attachTracks();
+    const handleTrackSubscribed = (track: any) => {
+      console.log('📥 Track subscribed:', track.kind, 'for', participant.identity);
+      setTimeout(() => attachTracks(), 100); // Small delay to ensure track is ready
+      forceUpdate({});
+    };
+    
+    const handleTrackUnsubscribed = (track: any) => {
+      console.log('📤 Track unsubscribed:', track.kind, 'for', participant.identity);
+      attachTracks();
+      forceUpdate({});
+    };
+
+    const handleTrackPublished = () => {
+      console.log('📢 Track published for:', participant.identity);
+      attachTracks();
+      forceUpdate({});
+    };
 
     participant.on('trackSubscribed', handleTrackSubscribed);
     participant.on('trackUnsubscribed', handleTrackUnsubscribed);
+    participant.on('trackPublished', handleTrackPublished);
 
     return () => {
+      clearInterval(intervalId);
       participant.off('trackSubscribed', handleTrackSubscribed);
       participant.off('trackUnsubscribed', handleTrackUnsubscribed);
+      participant.off('trackPublished', handleTrackPublished);
 
       // Detach tracks
       const videoPublication = participant.getTrackPublication(Track.Source.Camera);
@@ -58,20 +118,26 @@ export default function ParticipantTileSFU({ participant }: ParticipantTileSFUPr
         }
       }
     };
-  }, [participant]);
+  }, [participant, hasVideo]);
 
   const isVideoEnabled = participant.isCameraEnabled;
   const isAudioEnabled = participant.isMicrophoneEnabled;
+  
+  // Check if video track exists
+  const videoPublication = participant.getTrackPublication(Track.Source.Camera);
+  const showVideo = isVideoEnabled && (hasVideo || videoPublication?.track);
 
   return (
     <div className="relative bg-gray-800 rounded-lg overflow-hidden aspect-video">
-      {isVideoEnabled ? (
+      {showVideo ? (
         <video
           ref={videoRef}
           autoPlay
           playsInline
           muted={participant.isLocal}
           className="w-full h-full object-cover"
+          onLoadedMetadata={() => console.log('✅ Video metadata loaded for:', participant.identity)}
+          onPlay={() => console.log('▶️ Video playing for:', participant.identity)}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gray-700">
